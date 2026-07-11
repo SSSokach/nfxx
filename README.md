@@ -3,7 +3,10 @@
 AI Assistant Of The Non-Descending Gradient Team
 
 ## 设计文档
-**[AI Office Assistant Demo Design Document](./.trae/documents/ai-office-assistant-demo.md)**
+
+**[AI 办公助手 Demo](./.trae/documents/ai-office-assistant-demo.md)** — 聊天软件基座总体描述
+
+**[功能实现细节](./.trae/documents/ai-assistant-tech-spec.md)** — 办公辅助功能实现细节
 ## 启动方式
 
 ### 开发模式 （前后端热更新）：
