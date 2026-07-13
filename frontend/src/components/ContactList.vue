@@ -33,6 +33,10 @@ import { usersApi, chatsApi } from '../api'
 
 const emit = defineEmits(['user-change', 'contact-select'])
 
+const props = defineProps({
+  refreshKey: { type: Number, default: 0 }
+})
+
 const users = ref([])
 const contacts = ref([])
 const currentUserId = ref(1)
@@ -74,4 +78,7 @@ onMounted(() => {
 })
 
 watch(currentUserId, loadContacts)
+watch(() => props.refreshKey, () => {
+  loadContacts()
+})
 </script>

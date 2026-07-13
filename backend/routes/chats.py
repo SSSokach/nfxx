@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app import SessionLocal
 from models import Contact, Message, UserContact, User
 from datetime import datetime
+from typing import Optional
 
 router = APIRouter()
 
@@ -21,9 +22,20 @@ def get_contacts(user_id: int, db: Session = Depends(get_db)):
     result = []
     for contact in contacts:
         last_msg = db.query(Message).filter(Message.contact_id == contact.id).order_by(Message.created_at.desc()).first()
+        # For 1-on-1 chats, display the other participant's name
+        display_name = contact.name
+        if not contact.is_group:
+            other_uc = db.query(UserContact).filter(
+                UserContact.contact_id == contact.id,
+                UserContact.user_id != user_id
+            ).first()
+            if other_uc:
+                other_user = db.query(User).filter(User.id == other_uc.user_id).first()
+                if other_user:
+                    display_name = other_user.name
         result.append({
             "id": contact.id,
-            "name": contact.name,
+            "name": display_name,
             "avatar": contact.avatar,
             "is_group": contact.is_group,
             "last_message": last_msg.content if last_msg else "",
@@ -36,6 +48,15 @@ def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
     messages = db.query(Message).filter(Message.contact_id == contact_id).order_by(Message.created_at.asc()).all()
     result = []
     for msg in messages:
+        reply_data = None
+        if msg.reply_to_id:
+            ref = db.query(Message).filter(Message.id == msg.reply_to_id).first()
+            if ref:
+                reply_data = {
+                    "id": ref.id,
+                    "sender_name": ref.sender.name,
+                    "content": ref.content[:80]
+                }
         result.append({
             "id": msg.id,
             "sender_id": msg.sender_id,
@@ -45,18 +66,22 @@ def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
             "file_id": msg.file_id,
             "file_name": msg.file.name if msg.file else "",
             "created_at": msg.created_at.isoformat(),
-            "is_self": msg.sender_id == user_id
+            "is_self": msg.sender_id == user_id,
+            "reply_to": reply_data
         })
     return result
 
 @router.post("/send")
-def send_message(user_id: int, contact_id: int, content: str, message_type: str = "text", file_id: int = None, db: Session = Depends(get_db)):
+def send_message(user_id: int = Query(...), contact_id: int = Query(...), content: str = Query(...), message_type: str = Query("text"), file_id: Optional[str] = Query(None), reply_to_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    fid = int(file_id) if file_id and file_id.strip() else None
+    rid = int(reply_to_id) if reply_to_id and reply_to_id.strip() else None
     message = Message(
         sender_id=user_id,
         contact_id=contact_id,
         content=content,
         message_type=message_type,
-        file_id=file_id,
+        file_id=fid,
+        reply_to_id=rid,
         created_at=datetime.utcnow()
     )
     db.add(message)

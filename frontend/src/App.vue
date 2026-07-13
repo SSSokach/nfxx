@@ -1,6 +1,7 @@
 <template>
   <div id="app">
     <ContactList 
+      :refresh-key="refreshKey"
       @user-change="handleUserChange" 
       @contact-select="handleContactSelect" 
     />
@@ -8,8 +9,10 @@
       :selected-contact="selectedContact" 
       :current-user-id="currentUserId"
       :current-user="currentUser"
+      @message-sent="handleMessageSent"
+      @ai-chat="handleAiChat"
     />
-    <AIPanel :current-user-id="currentUserId" />
+    <AIPanel :current-user-id="currentUserId" :context-message="aiContextMessage" />
   </div>
 </template>
 
@@ -22,6 +25,8 @@ import AIPanel from './components/AIPanel.vue'
 const currentUserId = ref(1)
 const currentUser = ref({ id: 1, name: '张三' })
 const selectedContact = ref(null)
+const refreshKey = ref(0)
+const aiContextMessage = ref(null)
 
 const handleUserChange = (userId) => {
   currentUserId.value = userId
@@ -31,5 +36,13 @@ const handleUserChange = (userId) => {
 
 const handleContactSelect = (contact) => {
   selectedContact.value = contact
+}
+
+const handleMessageSent = () => {
+  refreshKey.value++
+}
+
+const handleAiChat = (message) => {
+  aiContextMessage.value = message
 }
 </script>

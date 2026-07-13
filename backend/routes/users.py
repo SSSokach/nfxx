@@ -12,6 +12,7 @@ def get_db():
     finally:
         db.close()
 
+@router.get("")
 @router.get("/")
 def get_users(db: Session = Depends(get_db)):
     users = db.query(User).all()
