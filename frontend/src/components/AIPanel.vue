@@ -2,8 +2,13 @@
   <div class="ai-panel">
     <!-- Header (keep existing purple gradient) -->
     <div class="ai-header">
-      <div class="ai-title">🤖 AI办公助手</div>
-      <div class="ai-description">智能办公多面手 · 待办 / 邮件 / 摘要 / 报告</div>
+      <div class="ai-header-top">
+        <div>
+          <div class="ai-title">AI办公助手</div>
+          <div class="ai-description">智能办公多面手 · 待办 / 邮件 / 摘要 / 报告</div>
+        </div>
+        <div class="ai-user-badge">用户 {{ currentUserLabel }}</div>
+      </div>
     </div>
 
     <!-- Tab bar -->
@@ -250,6 +255,61 @@
           选择时间段后点击"生成报告"
         </div>
       </div>
+
+      <!-- ===== Smart Reply Tab ===== -->
+      <div v-show="activeTab === 'smartReply'" class="tab-pane tab-pane-scroll">
+        <div class="section-title">智能回复建议</div>
+        <div class="smart-reply-hint">在聊天区域右键点击对方消息，选择「智能回复」即可在此查看建议</div>
+
+        <div v-if="smartReplyLoading" class="pane-loading">AI 正在生成回复建议...</div>
+        <div v-if="smartReplyError" class="pane-error">{{ smartReplyError }}</div>
+
+        <div v-if="smartReplyData && !smartReplyLoading" class="smart-reply-result">
+          <div class="smart-reply-source">
+            <span class="meta-tag">来自 {{ smartReplyData.message?.sender_name || '对方' }}</span>
+            <span class="meta-time" v-if="smartReplyData.tone">建议语气：{{ smartReplyData.tone }}</span>
+          </div>
+          <div class="smart-reply-original">{{ smartReplyData.message?.content }}</div>
+          <div class="smart-reply-list">
+            <div
+              v-for="(reply, idx) in smartReplyData.replies"
+              :key="idx"
+              class="smart-reply-option"
+              @click="useSmartReply(reply)"
+            >
+              <div class="smart-reply-num">{{ idx + 1 }}</div>
+              <div class="smart-reply-text">{{ reply }}</div>
+              <div class="smart-reply-use">点击使用</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!smartReplyData && !smartReplyLoading && !smartReplyError" class="pane-empty">
+          暂无回复建议
+        </div>
+      </div>
+
+      <!-- ===== Daily Digest Tab ===== -->
+      <div v-show="activeTab === 'dailyDigest'" class="tab-pane tab-pane-scroll">
+        <div class="section-title">AI 工作日报</div>
+        <div class="pane-toolbar">
+          <button
+            class="pane-btn primary"
+            :disabled="dailyDigestLoading"
+            @click="generateDailyDigest"
+          >
+            {{ dailyDigestLoading ? '生成中...' : '生成今日日报' }}
+          </button>
+        </div>
+
+        <div v-if="dailyDigestError" class="pane-error">{{ dailyDigestError }}</div>
+        <div v-if="dailyDigestLoading" class="pane-loading">AI 正在汇总今日工作动态...</div>
+
+        <div v-if="dailyDigestContent && !dailyDigestLoading" class="report-content markdown-content" v-html="renderMarkdown(dailyDigestContent)"></div>
+        <div v-if="!dailyDigestContent && !dailyDigestLoading && !dailyDigestError" class="pane-empty">
+          点击"生成今日日报"自动汇总今天的工作动态
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -261,7 +321,8 @@ import { aiApi, todosApi, emailsApi, reportsApi } from '../api'
 
 const props = defineProps({
   currentUserId: Number,
-  contextMessage: { type: Object, default: null }
+  contextMessage: { type: Object, default: null },
+  smartReplyEvent: { type: Object, default: null }
 })
 
 // ===== Tab management =====
@@ -271,8 +332,15 @@ const tabs = [
   { key: 'msgTodo', label: '消息待办', icon: '📋' },
   { key: 'emailTodo', label: '邮件待办', icon: '📧' },
   { key: 'fileSummary', label: '文件摘要', icon: '📄' },
-  { key: 'workReport', label: '工作报告', icon: '📊' }
+  { key: 'workReport', label: '工作报告', icon: '📊' },
+  { key: 'smartReply', label: '智能回复', icon: '💡' },
+  { key: 'dailyDigest', label: 'AI日报', icon: '📰' }
 ]
+
+const currentUserLabel = computed(() => {
+  const names = ['张三', '李四', '王五']
+  return names[(props.currentUserId || 1) - 1] || `#${props.currentUserId || 1}`
+})
 
 const switchTab = (key) => {
   activeTab.value = key
@@ -609,10 +677,67 @@ const renderMarkdown = (content) => {
   if (!content) return ''
   return marked(content)
 }
+
+// ===== Smart Reply =====
+const smartReplyData = ref(null)
+const smartReplyLoading = ref(false)
+const smartReplyError = ref('')
+
+watch(() => props.smartReplyEvent, (newVal) => {
+  if (newVal) {
+    smartReplyData.value = newVal
+    smartReplyError.value = ''
+    activeTab.value = 'smartReply'
+  }
+})
+
+const useSmartReply = (reply) => {
+  if (window.__useSmartReply) {
+    window.__useSmartReply(reply)
+  }
+}
+
+// ===== Daily Digest =====
+const dailyDigestContent = ref('')
+const dailyDigestLoading = ref(false)
+const dailyDigestError = ref('')
+
+const generateDailyDigest = async () => {
+  if (!props.currentUserId || dailyDigestLoading.value) return
+  dailyDigestLoading.value = true
+  dailyDigestError.value = ''
+  dailyDigestContent.value = ''
+  try {
+    const res = await aiApi.dailyDigest(props.currentUserId)
+    dailyDigestContent.value = res.data.report || ''
+  } catch (e) {
+    dailyDigestError.value = '日报生成失败'
+  }
+  dailyDigestLoading.value = false
+}
 </script>
 
 <style scoped>
 /* ===== Tab bar ===== */
+.ai-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-user-badge {
+  flex-shrink: 0;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+}
+
 .ai-tabs {
   display: flex;
   background-color: #ffffff;
@@ -1229,5 +1354,94 @@ const renderMarkdown = (content) => {
   border: 1px solid #e0d9f5;
   padding: 4px 8px;
   text-align: left;
+}
+
+/* ===== Smart Reply ===== */
+.smart-reply-hint {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background-color: #f9f8ff;
+  border-radius: var(--radius);
+  border: 1px dashed #d9d4f5;
+}
+
+.smart-reply-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.smart-reply-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.smart-reply-original {
+  padding: 10px 12px;
+  background-color: #f0f2f5;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: #333;
+  line-height: 1.5;
+  border-left: 3px solid #999;
+}
+
+.smart-reply-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.smart-reply-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background-color: #ffffff;
+  border: 1px solid #e8eaf0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.smart-reply-option:hover {
+  border-color: #667eea;
+  background-color: #f5f3ff;
+}
+
+.smart-reply-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.smart-reply-text {
+  flex: 1;
+  font-size: 13px;
+  color: #1f2937;
+  line-height: 1.5;
+}
+
+.smart-reply-use {
+  font-size: 11px;
+  color: #667eea;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.smart-reply-option:hover .smart-reply-use {
+  opacity: 1;
 }
 </style>

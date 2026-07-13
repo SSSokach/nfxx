@@ -34,7 +34,17 @@ export const filesApi = {
 export const aiApi = {
   getTools: () => api.get('/ai/tools'),
   callTool: (userId, toolName, args) => api.post(`/ai/call_tool?user_id=${userId}&tool_name=${toolName}`, args),
-  chat: (userId, message) => api.post(`/ai/chat?user_id=${userId}&message=${encodeURIComponent(message)}`, {}, { timeout: 120000 })
+  chat: (userId, message) => api.post(`/ai/chat?user_id=${userId}&message=${encodeURIComponent(message)}`, {}, { timeout: 120000 }),
+  smartReply: (userId, message, contactId) =>
+    api.post(`/ai/smart-reply?user_id=${userId}&message=${encodeURIComponent(message)}${contactId ? `&contact_id=${contactId}` : ''}`, {}, { timeout: 60000 }),
+  classifyMessage: (message) =>
+    api.post(`/ai/classify-message?message=${encodeURIComponent(message)}`, {}, { timeout: 60000 }),
+  dailyDigest: (userId) =>
+    api.post(`/ai/daily-digest/${userId}`, {}, { timeout: 120000 }),
+  prioritizeTodos: (userId) =>
+    api.post(`/ai/prioritize-todos/${userId}`, {}, { timeout: 60000 }),
+  meetingMinutes: (userId, contactId) =>
+    api.post(`/ai/meeting-minutes?user_id=${userId}&contact_id=${contactId}`, {}, { timeout: 120000 })
 }
 
 export const favoritesApi = {

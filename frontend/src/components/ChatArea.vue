@@ -106,6 +106,9 @@
       <div class="context-menu-item" @click="handleAiChat">
         <span class="menu-icon">🤖</span><span>AI对话</span>
       </div>
+      <div class="context-menu-item" @click="handleSmartReply">
+        <span class="menu-icon">💡</span><span>智能回复</span>
+      </div>
       <div class="context-menu-divider"></div>
       <div class="context-menu-item" @click="enterMultiSelect">
         <span class="menu-icon">☑️</span><span>多选</span>
@@ -239,7 +242,7 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue';
-import { chatsApi, filesApi, favoritesApi } from '../api';
+import { chatsApi, filesApi, favoritesApi, aiApi } from '../api';
 import { marked } from 'marked';
 
 const props = defineProps({
@@ -248,7 +251,7 @@ const props = defineProps({
   currentUser: Object
 });
 
-const emit = defineEmits(['message-sent', 'ai-chat']);
+const emit = defineEmits(['message-sent', 'ai-chat', 'smart-reply']);
 
 const messages = ref([]);
 const inputMessage = ref('');
@@ -501,6 +504,24 @@ const handleAiChat = () => {
   emit('ai-chat', { ...msg });
   closeContextMenu();
   showToast('已发送到AI助手');
+};
+
+const handleSmartReply = async () => {
+  const msg = contextMenu.value.message;
+  if (!msg || msg.is_self) return;
+  closeContextMenu();
+  showToast('正在生成回复建议...');
+  try {
+    const res = await aiApi.smartReply(props.currentUserId, msg.content, props.selectedContact?.id);
+    const replies = res.data.replies || [];
+    if (replies.length > 0) {
+      emit('smart-reply', { message: msg, replies: res.data.replies, tone: res.data.tone });
+    } else {
+      showToast('未生成回复建议');
+    }
+  } catch (e) {
+    showToast('生成回复失败');
+  }
 };
 
 // === Multi-select handlers ===

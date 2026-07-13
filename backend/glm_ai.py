@@ -5,7 +5,7 @@ import json
 from openai import OpenAI
 from dotenv import load_dotenv
 from app import SessionLocal
-from models import User, Contact, Message, UserContact, File
+from models import User, Contact, Message, UserContact, File, ChatTodoItem, EmailTodoItem
 
 load_dotenv()
 
@@ -417,6 +417,179 @@ def build_registry(user_id, user_name):
         handler=get_recent_messages,
     )
 
+    def smart_reply(args):
+        """根据对方消息和上下文，AI 生成智能回复建议。"""
+        message = args.get("message", "")
+        contact_id = args.get("contact_id", None)
+        if not message:
+            return "请提供要回复的消息内容"
+
+        context = ""
+        if contact_id:
+            db = SessionLocal()
+            msgs = db.query(Message).filter(
+                Message.contact_id == contact_id
+            ).order_by(Message.created_at.desc()).limit(6).all()
+            db.close()
+            if len(msgs) > 1:
+                lines = []
+                for m in reversed(msgs[:-1]):
+                    lines.append(f"{m.sender.name}: {m.content[:100]}")
+                context = "\n".join(lines)
+
+        result = generate_smart_reply(message, context)
+        if not result.get("replies"):
+            return "无法生成回复建议"
+        reply_lines = [f"{i+1}. {r}" for i, r in enumerate(result["replies"])]
+        tone_info = f"\n建议语气：{result.get('tone', '')}" if result.get("tone") else ""
+        return f"智能回复建议：\n" + "\n".join(reply_lines) + tone_info
+
+    def classify_msg(args):
+        """使用 AI 分析消息的意图类别。"""
+        message = args.get("message", "")
+        if not message:
+            return "请提供要分类的消息"
+        result = classify_message(message)
+        return f"分类结果：{result.get('category', '其他')}（置信度：{result.get('confidence', '中')}）\n意图概括：{result.get('summary', '')}"
+
+    def prioritize_my_todos(args):
+        """对用户当前的待办事项按优先级排序。"""
+        db = SessionLocal()
+        chat_todos = db.query(ChatTodoItem).filter(
+            ChatTodoItem.user_id == user_id,
+            ChatTodoItem.status == "pending",
+        ).all()
+        email_todos = db.query(EmailTodoItem).filter(
+            EmailTodoItem.user_id == user_id,
+            EmailTodoItem.status == "pending",
+        ).all()
+        db.close()
+
+        all_todos = []
+        for t in chat_todos:
+            dl = f" (截止:{t.deadline.isoformat()})" if t.deadline else ""
+            src = f"[{t.group_name}]" if t.group_name else (f"[{t.peer_name}]" if t.peer_name else "")
+            all_todos.append(f"{src} {t.content}{dl}")
+        for t in email_todos:
+            dl = f" (截止:{t.deadline.isoformat()})" if t.deadline else ""
+            all_todos.append(f"[邮件:{t.subject}] {t.content}{dl}")
+
+        if not all_todos:
+            return "当前没有待办事项"
+
+        result = prioritize_todos(all_todos)
+        if not result:
+            return "排序失败"
+        lines = []
+        for item in result:
+            lines.append(f"[{item.get('priority', '中')}] {item.get('original', '')} — {item.get('reason', '')}")
+        return f"待办优先级排序（共{len(result)}项）：\n" + "\n".join(lines)
+
+    def meeting_minutes(args):
+        """从群聊消息中提取会议纪要。"""
+        contact_name = args.get("contact_name", "")
+        limit = min(args.get("limit", 50), 100)
+        if not contact_name:
+            return "请提供群聊名称"
+
+        db = SessionLocal()
+        contact = db.query(Contact).filter(
+            Contact.name.like(f"%{contact_name}%"),
+            Contact.is_group == True,
+        ).first()
+        if not contact:
+            db.close()
+            return f"未找到群聊：{contact_name}"
+
+        msgs = db.query(Message).filter(
+            Message.contact_id == contact.id
+        ).order_by(Message.created_at.asc()).limit(limit).all()
+        db.close()
+
+        if not msgs:
+            return f"该群聊没有消息记录"
+
+        lines = []
+        for m in msgs:
+            lines.append(f"[{m.created_at.strftime('%H:%M')}] {m.sender.name}: {m.content}")
+        messages_text = "\n".join(lines)
+
+        result = extract_meeting_minutes(messages_text)
+        parts = []
+        parts.append(f"**会议主题**：{result.get('topic', '未知')}")
+        if result.get('attendees'):
+            parts.append(f"**参会人员**：{'、'.join(result['attendees'])}")
+        parts.append(f"**会议摘要**：{result.get('summary', '')}")
+        if result.get('key_decisions'):
+            parts.append(f"**关键决议**：\n" + "\n".join(f"- {d}" for d in result['key_decisions']))
+        if result.get('action_items'):
+            parts.append(f"**行动项**：\n" + "\n".join(f"- {a}" for a in result['action_items']))
+        return f"群「{contact_name}」的会议纪要：\n" + "\n\n".join(parts)
+
+    registry.register(
+        name="smart_reply",
+        description="根据对方消息和聊天上下文，AI 生成多个不同风格的回复建议。当用户需要回复消息但不知道怎么回时使用。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "对方发来的消息内容",
+                },
+                "contact_id": {
+                    "type": "integer",
+                    "description": "联系人/对话ID，用于获取上下文",
+                },
+            },
+            "required": ["message"],
+        },
+        handler=smart_reply,
+    )
+
+    registry.register(
+        name="classify_message",
+        description="使用 AI 分析消息的意图类别（任务分配、信息通知、会议邀请等），帮助用户快速理解消息性质。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "要分类的消息内容",
+                },
+            },
+            "required": ["message"],
+        },
+        handler=classify_msg,
+    )
+
+    registry.register(
+        name="prioritize_todos",
+        description="对当前用户的所有待办事项按紧急程度和重要性进行 AI 智能排序，帮助用户确定工作优先级。",
+        parameters={"type": "object", "properties": {}},
+        handler=prioritize_my_todos,
+    )
+
+    registry.register(
+        name="meeting_minutes",
+        description="从群聊消息记录中提取会议纪要，包括会议主题、参会人员、关键决议和行动项。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "contact_name": {
+                    "type": "string",
+                    "description": "群聊名称（支持模糊匹配）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "读取的最大消息条数，默认50",
+                    "default": 50,
+                },
+            },
+            "required": ["contact_name"],
+        },
+        handler=meeting_minutes,
+    )
+
     return registry
 
 
@@ -726,3 +899,201 @@ def generate_work_report(completed_tasks, pending_tasks):
 5. 语言简洁专业，直接输出 Markdown 内容，不要加代码块标记"""
 
     return _ai_call(prompt, expect_json=False)
+
+
+def generate_smart_reply(peer_message, context_messages=""):
+    """智能回复生成。
+
+    根据对方发来的消息和上下文，生成合适的回复建议。
+
+    Args:
+        peer_message: 对方发送的最新消息文本。
+        context_messages: 之前的上下文消息（可选）。
+
+    Returns:
+        dict: { replies: list[str], tone: str }
+    """
+    context_text = ""
+    if context_messages:
+        context_text = f"\n\n之前的对话上下文：\n{context_messages}\n"
+
+    prompt = f"""请根据以下对话，生成3个不同风格的回复建议。
+
+对方最新消息：
+{peer_message}
+{context_text}
+请以 JSON 格式返回，严格包含以下字段：
+- replies: 回复建议列表（字符串数组，3个不同风格的回复，每个20-80字）
+- tone: 建议的回复语气（如"正式"、"友好"、"简洁"等）
+
+只返回 JSON，不要任何额外文字。"""
+    result = _ai_call(prompt, expect_json=True)
+    return {
+        "replies": result.get("replies", []),
+        "tone": result.get("tone", ""),
+    }
+
+
+def generate_daily_digest(user_id):
+    """AI 日报生成。
+
+    汇总用户当天的消息、待办、邮件动态，生成工作日报。
+    """
+    db = SessionLocal()
+    from models import User, Contact, UserContact, Message, ChatTodoItem, EmailTodoItem
+    from datetime import date, datetime
+
+    user = db.query(User).filter(User.id == user_id).first()
+    user_name = user.name if user else "用户"
+
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+
+    user_contacts = db.query(UserContact).filter(UserContact.user_id == user_id).all()
+    contact_ids = [uc.contact_id for uc in user_contacts]
+
+    today_msgs = db.query(Message).filter(
+        Message.contact_id.in_(contact_ids),
+        Message.created_at >= today_start,
+        Message.created_at <= today_end,
+    ).order_by(Message.created_at.asc()).all()
+
+    pending_todos = db.query(ChatTodoItem).filter(
+        ChatTodoItem.user_id == user_id,
+        ChatTodoItem.status == "pending",
+    ).all()
+
+    pending_email_todos = db.query(EmailTodoItem).filter(
+        EmailTodoItem.user_id == user_id,
+        EmailTodoItem.status == "pending",
+    ).all()
+
+    completed_chat = db.query(ChatTodoItem).filter(
+        ChatTodoItem.user_id == user_id,
+        ChatTodoItem.status == "completed",
+        ChatTodoItem.completed_at >= today_start,
+        ChatTodoItem.completed_at <= today_end,
+    ).all()
+
+    completed_email = db.query(EmailTodoItem).filter(
+        EmailTodoItem.user_id == user_id,
+        EmailTodoItem.status == "completed",
+        EmailTodoItem.completed_at >= today_start,
+        EmailTodoItem.completed_at <= today_end,
+    ).all()
+
+    db.close()
+
+    msg_lines = []
+    for m in today_msgs[:30]:
+        contact = db.query(Contact).filter(Contact.id == m.contact_id).first()
+        contact_name = contact.name if contact else ""
+        msg_lines.append(f"[{m.created_at.strftime('%H:%M')}] {contact_name} - {m.sender.name}: {m.content[:80]}")
+    messages_text = "\n".join(msg_lines) if msg_lines else "今日无消息"
+
+    todo_lines = []
+    for t in pending_todos + pending_email_todos:
+        dl = f" (截止:{t.deadline.isoformat()})" if t.deadline else ""
+        todo_lines.append(f"- {t.content}{dl}")
+    todos_text = "\n".join(todo_lines) if todo_lines else "无待办"
+
+    completed_lines = []
+    for t in completed_chat + completed_email:
+        completed_lines.append(f"- {t.content}")
+    completed_text = "\n".join(completed_lines) if completed_lines else "今日无已完成项"
+
+    prompt = f"""请根据以下数据，为用户「{user_name}」生成今日工作日报（Markdown格式）。
+
+## 今日消息动态（共{len(today_msgs)}条）
+{messages_text}
+
+## 今日已完成（共{len(completed_chat) + len(completed_email)}项）
+{completed_text}
+
+## 待办事项（共{len(pending_todos) + len(pending_email_todos)}项）
+{todos_text}
+
+要求：
+1. 报告以 "# 工作日报 - {today.isoformat()}" 为标题
+2. 包含"今日沟通动态"部分，概括重要的聊天和邮件
+3. 包含"今日完成"部分，列出已完成的工作
+4. 包含"待办提醒"部分，标注紧急程度
+5. 语言简洁专业，直接输出 Markdown 内容，不要加代码块标记"""
+
+    return _ai_call(prompt, expect_json=False)
+
+
+def prioritize_todos(todo_items):
+    """待办优先级排序。
+
+    使用 AI 对待办事项按紧急程度和重要性进行排序。
+    """
+    todos_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(todo_items))
+
+    prompt = f"""请根据紧急程度和重要性，对以下待办事项进行优先级排序。
+
+待办事项：
+{todos_text}
+
+请以 JSON 格式返回，严格包含以下字段：
+- sorted_items: 排序后的待办列表（对象数组，每项包含：
+  - original: 原始待办文本
+  - priority: 优先级（"紧急"/"高"/"中"/"低"）
+  - reason: 排序理由（一句话））
+
+只返回 JSON，不要任何额外文字。"""
+    result = _ai_call(prompt, expect_json=True)
+    return result.get("sorted_items", [])
+
+
+def classify_message(message_content):
+    """消息分类。
+
+    分析消息内容，判断其意图类别。
+    """
+    prompt = f"""请分析以下消息的意图类别。
+
+消息内容：
+{message_content}
+
+请以 JSON 格式返回，严格包含以下字段：
+- category: 消息类别，从以下选择：任务分配、信息通知、会议邀请、文件分享、问题咨询、日常闲聊、审批流程、其他
+- confidence: 置信度（"高"/"中"/"低"）
+- summary: 一句话概括消息核心意图
+
+只返回 JSON，不要任何额外文字。"""
+    result = _ai_call(prompt, expect_json=True)
+    return {
+        "category": result.get("category", "其他"),
+        "confidence": result.get("confidence", "中"),
+        "summary": result.get("summary", ""),
+    }
+
+
+def extract_meeting_minutes(messages_text):
+    """会议纪要提取。
+
+    从群聊消息中提取会议纪要。
+    """
+    prompt = f"""请从以下群聊记录中提取会议纪要。
+
+群聊记录：
+{messages_text}
+
+请以 JSON 格式返回，严格包含以下字段：
+- topic: 会议主题
+- attendees: 参会人员列表（字符串数组）
+- key_decisions: 关键决议列表（字符串数组）
+- action_items: 行动项列表（字符串数组，每项包含负责人和任务）
+- summary: 会议摘要（2-3句话）
+
+只返回 JSON，不要任何额外文字。"""
+    result = _ai_call(prompt, expect_json=True)
+    return {
+        "topic": result.get("topic", ""),
+        "attendees": result.get("attendees", []),
+        "key_decisions": result.get("key_decisions", []),
+        "action_items": result.get("action_items", []),
+        "summary": result.get("summary", ""),
+    }

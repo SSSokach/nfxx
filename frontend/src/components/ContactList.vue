@@ -1,12 +1,33 @@
 <template>
   <div class="sidebar">
     <div class="sidebar-header">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-mark">AI</div>
+        <div class="sidebar-brand-text">
+          <div class="sidebar-brand-title">AI办公助手</div>
+          <div class="sidebar-brand-subtitle">聊天、文件与智能协作面板</div>
+        </div>
+      </div>
       <div class="user-switcher">
-        <span>当前用户:</span>
+        <span>当前用户</span>
         <select v-model="currentUserId" @change="handleUserChange">
           <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
         </select>
       </div>
+      <div class="sidebar-meta">
+        <div class="sidebar-meta-card">
+          <span class="sidebar-meta-label">会话数</span>
+          <span class="sidebar-meta-value">{{ contacts.length }}</span>
+        </div>
+        <div class="sidebar-meta-card">
+          <span class="sidebar-meta-label">当前身份</span>
+          <span class="sidebar-meta-value">{{ currentUserName }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="contacts-heading">
+      <span class="contacts-heading-title">最近会话</span>
+      <span class="contacts-heading-count">{{ contacts.length }}</span>
     </div>
     <div class="contacts-list">
       <div
@@ -28,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { usersApi, chatsApi } from '../api'
 
 const emit = defineEmits(['user-change', 'contact-select'])
@@ -41,6 +62,10 @@ const users = ref([])
 const contacts = ref([])
 const currentUserId = ref(1)
 const selectedContactId = ref(null)
+const currentUserName = computed(() => {
+  const user = users.value.find(item => item.id === Number(currentUserId.value))
+  return user ? user.name : '未选择'
+})
 
 const loadUsers = async () => {
   const res = await usersApi.getAll()
