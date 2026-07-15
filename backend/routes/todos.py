@@ -308,6 +308,68 @@ def update_chat_todo(
 
 
 # ------------------------------------------------------------------ #
+#  从消息直接创建待办
+# ------------------------------------------------------------------ #
+
+@router.post("/create-from-message/{user_id}/{message_id}")
+def create_todo_from_message(user_id: int, message_id: int, db: Session = Depends(get_db)):
+    """从一条消息直接创建待办事项（用户点击"创建待办"气泡时调用）。"""
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg:
+        return {"error": "消息不存在"}
+
+    # 检查是否已存在同 source_id 的待办
+    existing = db.query(ChatTodoItem).filter(
+        ChatTodoItem.user_id == user_id,
+        ChatTodoItem.source_id == message_id,
+    ).first()
+    if existing:
+        return {"message": "该消息已创建过待办", "todo_id": existing.id}
+
+    # 获取联系人信息
+    contact = db.query(Contact).filter(Contact.id == msg.contact_id).first()
+    source_type = "group" if (contact and contact.is_group) else "private"
+    group_name = contact.name if (contact and contact.is_group) else None
+    peer_name = None
+    if source_type == "private":
+        # 找到对方用户名
+        other_uc = db.query(UserContact).filter(
+            UserContact.contact_id == msg.contact_id,
+            UserContact.user_id != user_id,
+        ).first()
+        if other_uc:
+            peer_user = db.query(User).filter(User.id == other_uc.user_id).first()
+            if peer_user:
+                peer_name = peer_user.name
+
+    todo = ChatTodoItem(
+        user_id=user_id,
+        source_id=message_id,
+        source_type=source_type,
+        group_name=group_name,
+        peer_name=peer_name,
+        content=msg.content[:200],
+        deadline=None,
+        status="pending",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(todo)
+    db.commit()
+    db.refresh(todo)
+
+    return {
+        "todo_id": todo.id,
+        "content": todo.content,
+        "source_type": todo.source_type,
+        "group_name": todo.group_name,
+        "peer_name": todo.peer_name,
+        "status": todo.status,
+        "message": "待办已创建",
+    }
+
+
+# ------------------------------------------------------------------ #
 #  摘要转待办
 # ------------------------------------------------------------------ #
 

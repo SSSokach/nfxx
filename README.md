@@ -70,14 +70,14 @@ nfxx/
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt --break-system-packages
 ```
 
 ### 2. 初始化数据库
 
 ```bash
 cd backend
-python init_db.py
+python3 init_db.py
 ```
 
 数据库初始化后会自动创建以下测试数据：
@@ -100,7 +100,7 @@ npm install
 
 ```bash
 cd backend
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 后端服务将在 `http://localhost:8000` 运行，支持代码热更新。
@@ -131,7 +131,7 @@ npm run build
 
 ```bash
 cd backend
-uvicorn app:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 后端将自动提供前端静态文件，直接访问 `http://localhost:8000` 即可。

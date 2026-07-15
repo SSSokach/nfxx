@@ -58,7 +58,8 @@ export const todosApi = {
   scanMessages: (userId) => api.post(`/todos/scan-messages/${userId}`, {}, { timeout: 120000 }),
   getChatTodos: (userId, status) => api.get(`/todos/chat-todos/${userId}?status=${status || 'pending'}`),
   updateTodo: (todoId, action, deadline) => api.put(`/todos/chat-todos/${todoId}`, { action, deadline }),
-  convertToTodo: (todoId) => api.post(`/todos/chat-todos/${todoId}/convert`)
+  convertToTodo: (todoId) => api.post(`/todos/chat-todos/${todoId}/convert`),
+  createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`)
 }
 
 export const emailsApi = {

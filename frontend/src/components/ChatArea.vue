@@ -41,6 +41,13 @@
             </template>
           </div>
           <div class="message-time">{{ formatTime(message.created_at) }}</div>
+          <!-- Todo creation prompt (below the last received message) -->
+          <div class="todo-prompt-inline" v-if="isTodoPromptFor(message)">
+            <span class="todo-prompt-label">是否创建待办：</span>
+            <span class="todo-prompt-content">{{ getTodoTitle(message) }}</span>
+            <button class="todo-prompt-btn create" @click.stop="createTodoFromMessage(message)">创建</button>
+            <button class="todo-prompt-btn dismiss" @click.stop="dismissTodoPrompt(message)">忽略</button>
+          </div>
         </div>
       </div>
     </div>
@@ -72,6 +79,22 @@
       </div>
     </div>
 
+    <!-- Smart reply panel (above input, shown when user clicks the smart reply button) -->
+    <div class="smart-reply-panel" v-if="!multiSelectMode && smartReplyVisible">
+      <div class="smart-reply-panel-header">
+        <span class="smart-reply-panel-title">智能回复候选</span>
+        <button class="smart-reply-panel-close" @click="smartReplyVisible = false">×</button>
+      </div>
+      <div class="smart-reply-list">
+        <button
+          v-for="(reply, idx) in smartReplies"
+          :key="idx"
+          class="smart-reply-item"
+          @click="useSmartReply(reply)"
+        >{{ reply }}</button>
+      </div>
+    </div>
+
     <!-- Normal input area -->
     <div class="chat-input-area" v-if="!multiSelectMode">
       <button class="upload-btn" @click="showFileUpload = true">📁</button>
@@ -81,6 +104,7 @@
         placeholder="输入消息..."
         @keydown.enter.exact.prevent="sendMessage"
       ></textarea>
+      <button class="smart-reply-trigger" @click="toggleSmartReply" :class="{ active: smartReplyVisible }" title="智能回复">💡</button>
       <button class="send-btn" :disabled="!inputMessage.trim()" @click="sendMessage">发送</button>
     </div>
 
@@ -105,9 +129,6 @@
       </div>
       <div class="context-menu-item" @click="handleAiChat">
         <span class="menu-icon">🤖</span><span>AI对话</span>
-      </div>
-      <div class="context-menu-item" @click="handleSmartReply">
-        <span class="menu-icon">💡</span><span>智能回复</span>
       </div>
       <div class="context-menu-divider"></div>
       <div class="context-menu-item" @click="enterMultiSelect">
@@ -241,8 +262,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue';
-import { chatsApi, filesApi, favoritesApi, aiApi } from '../api';
+import { ref, watch, nextTick, computed } from 'vue';
+import { chatsApi, filesApi, favoritesApi, todosApi } from '../api';
 import { marked } from 'marked';
 
 const props = defineProps({
@@ -251,7 +272,7 @@ const props = defineProps({
   currentUser: Object
 });
 
-const emit = defineEmits(['message-sent', 'ai-chat', 'smart-reply']);
+const emit = defineEmits(['message-sent', 'ai-chat']);
 
 const messages = ref([]);
 const inputMessage = ref('');
@@ -297,6 +318,7 @@ const loadMessages = async () => {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
     }
   });
+  checkLastMessage();
 };
 
 const sendMessage = async () => {
@@ -506,22 +528,65 @@ const handleAiChat = () => {
   showToast('已发送到AI助手');
 };
 
-const handleSmartReply = async () => {
-  const msg = contextMenu.value.message;
-  if (!msg || msg.is_self) return;
-  closeContextMenu();
-  showToast('正在生成回复建议...');
-  try {
-    const res = await aiApi.smartReply(props.currentUserId, msg.content, props.selectedContact?.id);
-    const replies = res.data.replies || [];
-    if (replies.length > 0) {
-      emit('smart-reply', { message: msg, replies: res.data.replies, tone: res.data.tone });
-    } else {
-      showToast('未生成回复建议');
-    }
-  } catch (e) {
-    showToast('生成回复失败');
+// === Smart reply (button-triggered) ===
+const smartReplies = ['智能回复1', '智能回复2', '智能回复3'];
+const smartReplyVisible = ref(false);
+
+const toggleSmartReply = () => {
+  smartReplyVisible.value = !smartReplyVisible.value;
+};
+
+const useSmartReply = (reply) => {
+  inputMessage.value = reply;
+  smartReplyVisible.value = false;
+  nextTick(() => {
+    const input = document.querySelector('.chat-input');
+    if (input) input.focus();
+  });
+};
+
+// === Todo creation prompt (inline below message) ===
+const dismissedTodoMsgs = ref(new Set());
+const createdTodoMsgs = ref(new Set());
+
+// Find the last message from the other party
+const lastReceivedMsg = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (!messages.value[i].is_self) return messages.value[i];
   }
+  return null;
+});
+
+const isTodoPromptFor = (message) => {
+  const last = lastReceivedMsg.value;
+  if (!last || last.id !== message.id) return false;
+  if (dismissedTodoMsgs.value.has(message.id)) return false;
+  if (createdTodoMsgs.value.has(message.id)) return false;
+  return true;
+};
+
+const getTodoTitle = (message) => {
+  const content = message.content || '';
+  return content.length > 30 ? content.substring(0, 30) + '...' : content;
+};
+
+const createTodoFromMessage = async (message) => {
+  try {
+    await todosApi.createFromMessage(props.currentUserId, message.id);
+    showToast('待办已创建');
+    createdTodoMsgs.value.add(message.id);
+  } catch (e) {
+    showToast('创建待办失败');
+  }
+};
+
+const dismissTodoPrompt = (message) => {
+  dismissedTodoMsgs.value.add(message.id);
+};
+
+// Check last message (scroll to bottom, hide smart reply if self sent)
+const checkLastMessage = () => {
+  // No automatic actions needed; todo prompt is inline, smart reply is button-triggered
 };
 
 // === Multi-select handlers ===
@@ -580,6 +645,9 @@ const batchAiChat = () => {
 
 watch(() => props.selectedContact, () => {
   if (multiSelectMode.value) exitMultiSelect();
+  dismissedTodoMsgs.value = new Set();
+  createdTodoMsgs.value = new Set();
+  smartReplyVisible.value = false;
   loadMessages();
 }, { immediate: true });
 watch(() => props.currentUserId, loadMessages);
@@ -966,5 +1034,143 @@ watch(() => props.currentUserId, loadMessages);
 
 .file-action-btn.danger:hover {
   background-color: #fee2e2;
+}
+
+/* ===== Inline todo prompt (below message) ===== */
+.todo-prompt-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background-color: #f5f3ff;
+  border: 1px solid #d9d4f5;
+  border-radius: 8px;
+  max-width: 400px;
+}
+
+.todo-prompt-label {
+  font-size: 12px;
+  color: #667eea;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.todo-prompt-content {
+  flex: 1;
+  font-size: 12px;
+  color: #4a4a5e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-prompt-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.todo-prompt-btn.create {
+  background-color: #667eea;
+  color: #fff;
+}
+
+.todo-prompt-btn.create:hover {
+  opacity: 0.85;
+}
+
+.todo-prompt-btn.dismiss {
+  background-color: #eef0f5;
+  color: #666;
+}
+
+.todo-prompt-btn.dismiss:hover {
+  background-color: #e0e0e0;
+}
+
+/* ===== Smart reply panel + trigger button ===== */
+.smart-reply-panel {
+  flex-shrink: 0;
+  border-top: 1px solid #e8eaf0;
+  background-color: #faf9ff;
+  padding: 10px 14px;
+}
+
+.smart-reply-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.smart-reply-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.smart-reply-panel-close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+}
+
+.smart-reply-panel-close:hover {
+  color: #333;
+}
+
+.smart-reply-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smart-reply-item {
+  padding: 8px 14px;
+  border: 1px solid #d9d4f5;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.smart-reply-item:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
+.smart-reply-trigger {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background-color: #f0f4ff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.smart-reply-trigger:hover {
+  background-color: #e0e7ff;
+}
+
+.smart-reply-trigger.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 </style>
