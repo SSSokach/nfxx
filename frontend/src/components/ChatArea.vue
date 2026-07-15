@@ -272,7 +272,7 @@ const props = defineProps({
   currentUser: Object
 });
 
-const emit = defineEmits(['message-sent', 'ai-chat']);
+const emit = defineEmits(['message-sent', 'ai-chat', 'todo-created']);
 
 const messages = ref([]);
 const inputMessage = ref('');
@@ -575,6 +575,7 @@ const createTodoFromMessage = async (message) => {
     await todosApi.createFromMessage(props.currentUserId, message.id);
     showToast('待办已创建');
     createdTodoMsgs.value.add(message.id);
+    emit('todo-created');
   } catch (e) {
     showToast('创建待办失败');
   }

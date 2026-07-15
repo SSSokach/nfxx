@@ -89,10 +89,6 @@
 
       <!-- ===== Merged Todo Tab ===== -->
       <div v-show="activeTab === 'todo'" class="tab-pane tab-pane-scroll">
-        <div class="pane-toolbar">
-          <button class="pane-btn" :disabled="todoLoading" @click="loadAllTodos">刷新</button>
-        </div>
-
         <div v-if="todoError" class="pane-error">{{ todoError }}</div>
         <div v-if="todoLoading && mergedTodos.length === 0" class="pane-loading">加载中...</div>
 
@@ -131,7 +127,8 @@ import { aiApi, todosApi, emailsApi } from '../api'
 
 const props = defineProps({
   currentUserId: Number,
-  contextMessage: { type: Object, default: null }
+  contextMessage: { type: Object, default: null },
+  todoRefreshKey: { type: Number, default: 0 }
 })
 
 // ===== Tab management =====
@@ -191,6 +188,16 @@ watch(() => props.contextMessage, (newVal) => {
       if (input) input.focus()
     })
   }
+})
+
+watch(() => props.todoRefreshKey, () => {
+  loadAllTodos()
+})
+
+watch(() => props.currentUserId, () => {
+  chatTodos.value = []
+  emailTodos.value = []
+  loadAllTodos()
 })
 
 const clearContext = () => {

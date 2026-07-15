@@ -57,7 +57,7 @@ export const todosApi = {
   getChatSummary: (userId) => api.get(`/todos/chat-summary/${userId}`),
   scanMessages: (userId) => api.post(`/todos/scan-messages/${userId}`, {}, { timeout: 120000 }),
   getChatTodos: (userId, status) => api.get(`/todos/chat-todos/${userId}?status=${status || 'pending'}`),
-  updateTodo: (todoId, action, deadline) => api.put(`/todos/chat-todos/${todoId}`, { action, deadline }),
+  updateTodo: (todoId, action, deadline) => api.put(`/todos/chat-todos/${todoId}?action=${action}${deadline ? `&deadline=${deadline}` : ''}`),
   convertToTodo: (todoId) => api.post(`/todos/chat-todos/${todoId}/convert`),
   createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`)
 }
@@ -66,7 +66,7 @@ export const emailsApi = {
   getList: (userId) => api.get(`/emails/list/${userId}`),
   scan: (userId) => api.post(`/emails/scan/${userId}`, {}, { timeout: 120000 }),
   getTodos: (userId) => api.get(`/emails/todos/${userId}`),
-  updateTodo: (todoId, action) => api.put(`/emails/todos/${todoId}`, { action }),
+  updateTodo: (todoId, action) => api.put(`/emails/todos/${todoId}?action=${action}`),
   getTrackers: (userId) => api.get(`/emails/trackers/${userId}`),
   track: (emailId) => api.post(`/emails/track/${emailId}`),
   checkTrackers: (userId) => api.post(`/emails/trackers/check/${userId}`, {}, { timeout: 120000 })

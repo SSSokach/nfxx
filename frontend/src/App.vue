@@ -13,8 +13,9 @@
           :current-user="currentUser"
           @message-sent="handleMessageSent"
           @ai-chat="handleAiChat"
+          @todo-created="handleTodoCreated"
         />
-        <AIPanel :current-user-id="currentUserId" :context-message="aiContextMessage" />
+        <AIPanel :current-user-id="currentUserId" :context-message="aiContextMessage" :todo-refresh-key="todoRefreshKey" />
       </div>
     </div>
   </div>
@@ -31,6 +32,7 @@ const currentUser = ref({ id: 1, name: '张三' })
 const selectedContact = ref(null)
 const refreshKey = ref(0)
 const aiContextMessage = ref(null)
+const todoRefreshKey = ref(0)
 
 const handleUserChange = (userId) => {
   currentUserId.value = userId
@@ -48,5 +50,9 @@ const handleMessageSent = () => {
 
 const handleAiChat = (message) => {
   aiContextMessage.value = message
+}
+
+const handleTodoCreated = () => {
+  todoRefreshKey.value++
 }
 </script>
