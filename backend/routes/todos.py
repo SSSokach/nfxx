@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app import SessionLocal
 from models import (
     ChatSummary, ChatTodoItem, Message, Contact, UserContact, User,
+    CandidateTodo, ScannedMessage,
 )
 from datetime import datetime
 from typing import Optional
@@ -413,4 +414,234 @@ def convert_summary_to_todo(todo_id: int, db: Session = Depends(get_db)):
         "group_name": todo.group_name,
         "status": todo.status,
         "message": "摘要已转换为待办",
+    }
+
+
+# ------------------------------------------------------------------ #
+#  候选待办 (Candidate Todos)
+# ------------------------------------------------------------------ #
+
+@router.post("/scan-candidates/{user_id}")
+def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
+    """AI 扫描最近消息，自动检测候选待办（需用户确认）。
+
+    去重逻辑：
+    - 已有候选待办记录（pending/confirmed/dismissed）的消息不会重复扫描
+    - 已有正式待办（ChatTodoItem）的消息不会重复扫描
+    - 只扫描尚未处理过的新消息
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {"error": "用户不存在"}
+    user_name = user.name
+
+    user_contacts = db.query(UserContact).filter(
+        UserContact.user_id == user_id
+    ).all()
+    contact_ids = [uc.contact_id for uc in user_contacts]
+    if not contact_ids:
+        return {"new_count": 0, "message": "没有联系人"}
+
+    all_contacts = db.query(Contact).filter(Contact.id.in_(contact_ids)).all()
+
+    # === 收集已处理过的 message_id 集合 ===
+    # 1. 已扫描过的消息（ScannedMessage 记录表，无论是否检测到候选）
+    scanned_msg_ids = {
+        sm.message_id for sm in db.query(ScannedMessage).filter(
+            ScannedMessage.user_id == user_id,
+        ).all()
+    }
+    # 2. 已有候选待办记录的消息（兼容旧数据，候选待办也记录了 source_message_id）
+    candidate_msg_ids = {
+        c.source_message_id for c in db.query(CandidateTodo).filter(
+            CandidateTodo.user_id == user_id,
+            CandidateTodo.source_message_id.isnot(None),
+        ).all()
+    }
+    # 3. 已有正式待办的消息
+    todo_msg_ids = {
+        t.source_id for t in db.query(ChatTodoItem).filter(
+            ChatTodoItem.user_id == user_id,
+            ChatTodoItem.source_id.isnot(None),
+        ).all()
+    }
+    processed_ids = scanned_msg_ids | candidate_msg_ids | todo_msg_ids
+
+    # === 查询未处理的消息（别人发的，且不在 processed_ids 中）===
+    # 先查最近 100 条别人发的消息，再从中过滤未处理的
+    recent_msgs = db.query(Message).filter(
+        Message.contact_id.in_(contact_ids),
+        Message.sender_id != user_id,
+    ).order_by(Message.created_at.desc()).limit(100).all()
+
+    unprocessed = [m for m in recent_msgs if m.id not in processed_ids]
+    if not unprocessed:
+        return {
+            "new_count": 0,
+            "message": "没有新的消息需要扫描",
+            "scanned_total": len(recent_msgs),
+            "already_processed": len(recent_msgs),
+        }
+
+    # 构建批量消息（按时间正序）
+    messages_batch = []
+    for m in reversed(unprocessed):
+        contact = next((c for c in all_contacts if c.id == m.contact_id), None)
+        source_name = contact.name if contact else ""
+        source_type = "group" if (contact and contact.is_group) else "private"
+        messages_batch.append({
+            "id": m.id,
+            "sender": m.sender.name if m.sender else "",
+            "source": source_name,
+            "content": m.content,
+            "contact_id": m.contact_id,
+            "source_type": source_type,
+        })
+
+    # 调用 AI / 规则检测候选待办
+    try:
+        candidates = glm_ai.detect_candidate_todos(messages_batch, user_name)
+    except Exception as e:
+        return {"error": f"AI 检测失败: {e}"}
+
+    # === 保存候选待办（二次去重，防止并发问题）===
+    new_count = 0
+    for c in candidates:
+        msg_id = c.get("message_id")
+        if not msg_id:
+            continue
+        # 二次检查：确保该消息没有已有的候选待办
+        existing = db.query(CandidateTodo).filter(
+            CandidateTodo.user_id == user_id,
+            CandidateTodo.source_message_id == msg_id,
+        ).first()
+        if existing:
+            continue
+
+        msg_data = next((m for m in messages_batch if m["id"] == msg_id), None)
+        if not msg_data:
+            continue
+
+        candidate = CandidateTodo(
+            user_id=user_id,
+            source_message_id=msg_id,
+            source_type=msg_data["source_type"],
+            source_name=msg_data["source"],
+            content=c.get("content", ""),
+            deadline=_parse_deadline(c.get("deadline")),
+            status="pending",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(candidate)
+        new_count += 1
+
+    # === 将本次扫描的所有消息标记为已扫描（无论是否检测到候选）===
+    for m in messages_batch:
+        # 避免重复插入
+        already = db.query(ScannedMessage).filter(
+            ScannedMessage.user_id == user_id,
+            ScannedMessage.message_id == m["id"],
+        ).first()
+        if not already:
+            db.add(ScannedMessage(
+                user_id=user_id,
+                message_id=m["id"],
+                scanned_at=datetime.utcnow(),
+            ))
+
+    db.commit()
+    return {
+        "new_count": new_count,
+        "message": f"扫描完成：检测 {len(unprocessed)} 条新消息，发现 {new_count} 条候选待办",
+        "scanned_total": len(unprocessed),
+        "already_processed": len(recent_msgs) - len(unprocessed),
+    }
+
+
+@router.get("/candidates/{user_id}")
+def get_candidate_todos(
+    user_id: int,
+    status: Optional[str] = Query(None, description="pending/confirmed/dismissed"),
+    db: Session = Depends(get_db),
+):
+    """获取候选待办列表。"""
+    query = db.query(CandidateTodo).filter(CandidateTodo.user_id == user_id)
+    if status:
+        query = query.filter(CandidateTodo.status == status)
+    else:
+        query = query.filter(CandidateTodo.status == "pending")
+    candidates = query.order_by(CandidateTodo.created_at.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "source_message_id": c.source_message_id,
+            "source_type": c.source_type,
+            "source_name": c.source_name,
+            "content": c.content,
+            "deadline": c.deadline.isoformat() if c.deadline else None,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in candidates
+    ]
+
+
+@router.post("/candidates/{candidate_id}/confirm")
+def confirm_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """确认候选待办：转为正式待办。"""
+    candidate = db.query(CandidateTodo).filter(CandidateTodo.id == candidate_id).first()
+    if not candidate:
+        return {"error": "候选待办不存在"}
+    if candidate.status != "pending":
+        return {"error": f"该候选待办已处理（状态: {candidate.status}）"}
+
+    # 创建正式待办
+    todo = ChatTodoItem(
+        user_id=candidate.user_id,
+        source_id=candidate.source_message_id,
+        source_type=candidate.source_type,
+        group_name=candidate.source_name if candidate.source_type == "group" else None,
+        peer_name=candidate.source_name if candidate.source_type == "private" else None,
+        content=candidate.content,
+        deadline=candidate.deadline,
+        status="pending",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(todo)
+
+    # 更新候选待办状态
+    candidate.status = "confirmed"
+    candidate.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(todo)
+
+    return {
+        "todo_id": todo.id,
+        "candidate_id": candidate.id,
+        "content": todo.content,
+        "status": "confirmed",
+        "message": "候选待办已确认并转为正式待办",
+    }
+
+
+@router.post("/candidates/{candidate_id}/dismiss")
+def dismiss_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """忽略候选待办。"""
+    candidate = db.query(CandidateTodo).filter(CandidateTodo.id == candidate_id).first()
+    if not candidate:
+        return {"error": "候选待办不存在"}
+    if candidate.status != "pending":
+        return {"error": f"该候选待办已处理（状态: {candidate.status}）"}
+
+    candidate.status = "dismissed"
+    candidate.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "candidate_id": candidate.id,
+        "status": "dismissed",
+        "message": "候选待办已忽略",
     }

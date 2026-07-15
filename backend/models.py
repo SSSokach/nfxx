@@ -146,6 +146,30 @@ class UserSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class CandidateTodo(Base):
+    """候选待办表 - AI自动检测出的待办事项，需用户确认"""
+    __tablename__ = "candidate_todo"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
+    source_type = Column(String, default="group")  # group / private
+    source_name = Column(String, nullable=True)
+    content = Column(Text)
+    deadline = Column(Date, nullable=True)
+    status = Column(String, default="pending")  # pending / confirmed / dismissed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScannedMessage(Base):
+    """已扫描消息记录表 - 记录哪些消息已经被候选待办扫描处理过"""
+    __tablename__ = "scanned_message"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    message_id = Column(Integer, ForeignKey("messages.id"))
+    scanned_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Email(Base):
     """邮件表（模拟邮件系统）"""
     __tablename__ = "emails"

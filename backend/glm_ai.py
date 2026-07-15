@@ -5,7 +5,7 @@ import json
 from openai import OpenAI
 from dotenv import load_dotenv
 from app import SessionLocal
-from models import User, Contact, Message, UserContact, File, ChatTodoItem, EmailTodoItem
+from models import User, Contact, Message, UserContact, File, ChatTodoItem, EmailTodoItem, CandidateTodo
 
 load_dotenv()
 
@@ -1097,3 +1097,190 @@ def extract_meeting_minutes(messages_text):
         "action_items": result.get("action_items", []),
         "summary": result.get("summary", ""),
     }
+
+
+def detect_candidate_todos(messages_batch, user_name):
+    """候选待办检测。
+
+    批量分析消息，找出需要用户处理的事项（候选待办）。
+    这些事项需要用户确认后才会转为正式待办。
+
+    优先使用 AI 检测；若 AI 未配置或调用失败，则使用规则匹配作为 fallback。
+
+    Args:
+        messages_batch: 消息列表，每项为 dict { id, sender, source, content }
+        user_name: 当前用户名
+
+    Returns:
+        list[dict]: 候选待办列表，每项 { message_id, content, deadline }
+    """
+    if not messages_batch:
+        return []
+
+    # ---- 优先尝试 AI 检测 ----
+    if API_KEY:
+        lines = []
+        for i, m in enumerate(messages_batch):
+            lines.append(f"{i+1}. [来源:{m['source']}] {m['sender']}: {m['content'][:200]}")
+        messages_text = "\n".join(lines)
+
+        prompt = f"""请分析以下聊天消息，找出所有需要用户「{user_name}」处理或跟进的事项。
+
+消息列表：
+{messages_text}
+
+判断标准：
+- 对方要求用户做的事（如提交文档、review代码、参加会议等）
+- 有明确截止时间的任务
+- 需要用户回复或确认的事项
+- 不包括：纯通知、闲聊、用户自己发的消息中已回复的
+
+请以 JSON 格式返回，严格包含以下字段：
+- candidates: 候选待办列表（对象数组，每项包含：
+  - message_index: 对应消息的序号（从1开始）
+  - content: 待办事项描述（简洁明确）
+  - deadline: 截止日期 YYYY-MM-DD 格式（如果有提到则提取，否则返回 null））
+
+如果没有需要处理的事项，返回空数组。
+
+只返回 JSON，不要任何额外文字。"""
+        try:
+            result = _ai_call(prompt, expect_json=True)
+            candidates_raw = result.get("candidates", [])
+            candidates = []
+            for c in candidates_raw:
+                idx = c.get("message_index", 0) - 1
+                if 0 <= idx < len(messages_batch):
+                    candidates.append({
+                        "message_id": messages_batch[idx]["id"],
+                        "content": c.get("content", ""),
+                        "deadline": c.get("deadline"),
+                    })
+            if candidates:
+                return candidates
+        except Exception:
+            pass  # AI 失败，降级到规则匹配
+
+    # ---- 规则匹配 fallback ----
+    import re
+    from datetime import date, timedelta
+
+    # 关键词模式：任务型
+    task_patterns = [
+        r'(?i)(?:帮忙|请|麻烦|需要你|你(?:来|去|帮忙)|@?张三)\s*(.{2,})',
+        r'(?i)(review|审核|检查|提交|发送|准备|整理|更新|修改|完成|写|做|给)\s*(.{2,})',
+        r'(?i)(?:什么时候|多久|能否|可以)\s*(.{2,})',
+    ]
+
+    # 截止时间模式
+    deadline_patterns = [
+        # 下周X / 本周X / 周X
+        (r'(?:下|本)周[一二三四五六天日]\s*(?:前|之前)?', 7),
+        # 明天/后天/今天
+        (r'今天(?:之?前)?', 0),
+        (r'明天(?:之?前)?', 1),
+        (r'后天(?:之?前)?', 2),
+        # X月X号前 / X月X日前
+        (r'(\d{1,2})月(\d{1,2})号?(?:之?前)?', None),
+        # X号前
+        (r'(\d{1,2})号(?:之?前)?', None),
+        # N天内
+        (r'(\d+)\s*天[内以]', None),
+    ]
+
+    weekdays = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6, '天': 6}
+
+    def extract_deadline(text):
+        today = date.today()
+        # X月X号
+        m = re.search(r'(\d{1,2})月(\d{1,2})号?(?:之?前)?', text)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+            try:
+                return date(today.year, month, day).isoformat()
+            except ValueError:
+                pass
+        # 今天/明天/后天
+        if re.search(r'今天', text):
+            return today.isoformat()
+        if re.search(r'明天', text):
+            return (today + timedelta(days=1)).isoformat()
+        if re.search(r'后天', text):
+            return (today + timedelta(days=2)).isoformat()
+        # 下周X
+        m = re.search(r'下周([一二三四五六天日])', text)
+        if m:
+            target_wd = weekdays[m.group(1)]
+            delta = (target_wd - today.weekday() + 7) % 7
+            if delta == 0:
+                delta = 7
+            return (today + timedelta(days=delta)).isoformat()
+        # 本周X
+        m = re.search(r'本周([一二三四五六天日])', text)
+        if m:
+            target_wd = weekdays[m.group(1)]
+            delta = (target_wd - today.weekday() + 7) % 7
+            return (today + timedelta(days=delta)).isoformat()
+        # N天内
+        m = re.search(r'(\d+)\s*天[内以]', text)
+        if m:
+            return (today + timedelta(days=int(m.group(1)))).isoformat()
+        # X号前
+        m = re.search(r'(\d{1,2})号(?:之?前)?', text)
+        if m and not re.search(r'\d{1,2}月', text):
+            day = int(m.group(1))
+            if today.day <= day:
+                return date(today.year, today.month, day).isoformat()
+            else:
+                nm = today.month + 1 if today.month < 12 else 1
+                ny = today.year if today.month < 12 else today.year + 1
+                try:
+                    return date(ny, nm, day).isoformat()
+                except ValueError:
+                    pass
+        return None
+
+    # 排除模式：纯闲聊
+    chat_keywords = ['天气', '吃饭', '下班', '周末', '休息', '早安', '晚安',
+                     '谢谢', '不客气', '好的', '收到', '哈哈', '呵呵']
+
+    # 任务关键词
+    task_keywords = ['帮忙', '麻烦', '需要', '请', 'review', '审核', '提交',
+                     '发送', '准备', '整理', '更新', '修改', '完成', '写',
+                     '做', '给', '开个会', '什么时候', '能否', '讨论',
+                     '带一下', '整理', '部署', '配置', '修复']
+
+    candidates = []
+    for msg in messages_batch:
+        content = msg.get('content', '')
+        if not content or len(content) < 5:
+            continue
+
+        # 排除纯闲聊
+        if any(kw in content for kw in chat_keywords) and not any(kw in content for kw in task_keywords):
+            continue
+
+        # 检查是否包含任务关键词
+        has_task = any(kw in content.lower() for kw in task_keywords)
+        # 检查是否 @ 了用户
+        mentions_user = f'@{user_name}' in content or '@张三' in content
+        # 检查是否有截止时间
+        has_deadline = bool(extract_deadline(content))
+
+        if has_task or (mentions_user and has_deadline):
+            # 清理内容，提取核心任务描述
+            clean_content = content
+            # 去掉 @张三/@所有人 等前缀
+            clean_content = re.sub(r'@\S+\s*', '', clean_content).strip()
+            # 如果太长，截取
+            if len(clean_content) > 100:
+                clean_content = clean_content[:100] + '...'
+
+            deadline = extract_deadline(content)
+            candidates.append({
+                "message_id": msg['id'],
+                "content": clean_content,
+                "deadline": deadline,
+            })
+
+    return candidates

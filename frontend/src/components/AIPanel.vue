@@ -87,32 +87,72 @@
         </div>
       </div>
 
-      <!-- ===== Merged Todo Tab ===== -->
-      <div v-show="activeTab === 'todo'" class="tab-pane tab-pane-scroll">
+      <!-- ===== Merged Todo Tab (split into candidate top + confirmed bottom) ===== -->
+      <div v-show="activeTab === 'todo'" class="tab-pane tab-pane-todo">
         <div v-if="todoError" class="pane-error">{{ todoError }}</div>
-        <div v-if="todoLoading && mergedTodos.length === 0" class="pane-loading">加载中...</div>
 
-        <div class="section-title">待办列表</div>
-        <div v-if="mergedTodos.length === 0 && !todoLoading" class="pane-empty">暂无待办</div>
-        <div class="todo-list">
-          <div
-            v-for="todo in mergedTodos"
-            :key="todo.uid"
-            class="todo-item"
-            :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed' }"
-          >
-            <div class="todo-content">{{ todo.content || todo.title }}</div>
-            <div class="todo-meta">
-              <span class="meta-tag" v-if="todo.source_type === 'email'">✉️ 邮件</span>
-              <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
-              <span class="meta-tag" v-else>👥 群聊</span>
-              <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
-              <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
-              <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
+        <!-- Top: Candidate Todos -->
+        <div class="todo-col">
+          <div class="todo-col-header">
+            <span class="todo-col-title">🔍 候选待办</span>
+            <button
+              class="todo-scan-btn"
+              :disabled="candidateScanning"
+              @click="scanCandidates"
+            >{{ candidateScanning ? '扫描中...' : 'AI扫描' }}</button>
+          </div>
+          <div v-if="candidateScanning && candidateTodos.length === 0" class="pane-loading">AI 正在扫描消息...</div>
+          <div class="todo-scroll">
+            <div v-if="candidateTodos.length === 0 && !candidateScanning" class="pane-empty">暂无候选待办</div>
+            <div
+              v-for="c in candidateTodos"
+              :key="`cand-${c.id}`"
+              class="candidate-item"
+            >
+              <div class="candidate-content">{{ c.content }}</div>
+              <div class="candidate-meta">
+                <span class="meta-tag" v-if="c.source_type === 'group'">👥 {{ c.source_name }}</span>
+                <span class="meta-tag" v-else>💬 {{ c.source_name }}</span>
+                <span class="meta-time" v-if="c.deadline">⏰ {{ formatDate(c.deadline) }}</span>
+              </div>
+              <div class="candidate-actions">
+                <button class="mini-btn success" @click="confirmCandidate(c)">确认</button>
+                <button class="mini-btn danger" @click="dismissCandidate(c)">忽略</button>
+              </div>
             </div>
-            <div class="todo-actions" v-if="todo.status === 'pending'">
-              <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
-              <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div class="todo-divider"></div>
+
+        <!-- Bottom: Confirmed Todos -->
+        <div class="todo-col">
+          <div class="todo-col-header">
+            <span class="todo-col-title">✅ 待办列表</span>
+          </div>
+          <div v-if="todoLoading && mergedTodos.length === 0" class="pane-loading">加载中...</div>
+          <div class="todo-scroll">
+            <div v-if="mergedTodos.length === 0 && !todoLoading" class="pane-empty">暂无待办</div>
+            <div
+              v-for="todo in mergedTodos"
+              :key="todo.uid"
+              class="todo-item"
+              :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed' }"
+            >
+              <div class="todo-content">{{ todo.content || todo.title }}</div>
+              <div class="todo-meta">
+                <span class="meta-tag" v-if="todo.source_type === 'email'">✉️ 邮件</span>
+                <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
+                <span class="meta-tag" v-else>👥 群聊</span>
+                <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
+                <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
+                <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
+              </div>
+              <div class="todo-actions" v-if="todo.status === 'pending'">
+                <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
+                <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
+              </div>
             </div>
           </div>
         </div>
@@ -145,8 +185,9 @@ const currentUserLabel = computed(() => {
 
 const switchTab = (key) => {
   activeTab.value = key
-  if (key === 'todo' && mergedTodos.value.length === 0) {
+  if (key === 'todo') {
     loadAllTodos()
+    loadCandidates()
   }
 }
 
@@ -197,7 +238,9 @@ watch(() => props.todoRefreshKey, () => {
 watch(() => props.currentUserId, () => {
   chatTodos.value = []
   emailTodos.value = []
+  candidateTodos.value = []
   loadAllTodos()
+  loadCandidates()
 })
 
 const clearContext = () => {
@@ -348,6 +391,54 @@ const deleteTodo = async (todo) => {
       await emailsApi.updateTodo(todo.id, 'delete')
     }
     await loadAllTodos()
+  } catch (e) {
+    todoError.value = '操作失败'
+  }
+}
+
+// ===== Candidate Todos =====
+const candidateTodos = ref([])
+const candidateScanning = ref(false)
+
+const loadCandidates = async () => {
+  if (!props.currentUserId) return
+  try {
+    const res = await todosApi.getCandidates(props.currentUserId)
+    candidateTodos.value = res.data || []
+  } catch (e) {
+    // silent fail
+  }
+}
+
+const scanCandidates = async () => {
+  if (!props.currentUserId || candidateScanning.value) return
+  candidateScanning.value = true
+  todoError.value = ''
+  try {
+    await todosApi.scanCandidates(props.currentUserId)
+    await loadCandidates()
+  } catch (e) {
+    todoError.value = 'AI 扫描失败'
+  }
+  candidateScanning.value = false
+}
+
+const confirmCandidate = async (c) => {
+  todoError.value = ''
+  try {
+    await todosApi.confirmCandidate(c.id)
+    await loadCandidates()
+    await loadAllTodos()
+  } catch (e) {
+    todoError.value = '确认失败'
+  }
+}
+
+const dismissCandidate = async (c) => {
+  todoError.value = ''
+  try {
+    await todosApi.dismissCandidate(c.id)
+    await loadCandidates()
   } catch (e) {
     todoError.value = '操作失败'
   }
@@ -752,5 +843,113 @@ const deleteTodo = async (todo) => {
 
 .mini-btn.danger {
   background-color: #ef4444;
+}
+
+/* ===== Todo tab: split layout (top/bottom) ===== */
+.tab-pane-todo {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.todo-col {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.todo-divider {
+  height: 1px;
+  width: 100%;
+  background-color: #e8eaf0;
+  flex-shrink: 0;
+}
+
+.todo-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8eaf0;
+  flex-shrink: 0;
+  background-color: #faf9ff;
+}
+
+.todo-col-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a4a5e;
+}
+
+.todo-scan-btn {
+  padding: 4px 10px;
+  border: 1px solid #667eea;
+  border-radius: 6px;
+  background-color: #667eea;
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.todo-scan-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.todo-scan-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* ===== Candidate todo items ===== */
+.candidate-item {
+  padding: 10px 12px;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: all 0.15s;
+}
+
+.candidate-item:hover {
+  border-color: #f59e0b;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.12);
+}
+
+.candidate-content {
+  font-size: 13px;
+  color: #1f2937;
+  line-height: 1.5;
+  word-break: break-word;
+  margin-bottom: 6px;
+}
+
+.candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.candidate-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Override todo-list for compact scroll area */
+.todo-scroll .todo-item {
+  margin-bottom: 8px;
 }
 </style>

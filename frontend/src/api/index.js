@@ -59,7 +59,12 @@ export const todosApi = {
   getChatTodos: (userId, status) => api.get(`/todos/chat-todos/${userId}?status=${status || 'pending'}`),
   updateTodo: (todoId, action, deadline) => api.put(`/todos/chat-todos/${todoId}?action=${action}${deadline ? `&deadline=${deadline}` : ''}`),
   convertToTodo: (todoId) => api.post(`/todos/chat-todos/${todoId}/convert`),
-  createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`)
+  createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`),
+  // 候选待办
+  scanCandidates: (userId) => api.post(`/todos/scan-candidates/${userId}`, {}, { timeout: 120000 }),
+  getCandidates: (userId) => api.get(`/todos/candidates/${userId}`),
+  confirmCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/confirm`),
+  dismissCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/dismiss`)
 }
 
 export const emailsApi = {
