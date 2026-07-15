@@ -8,6 +8,7 @@
           @contact-select="handleContactSelect"
         />
         <ChatArea
+          ref="chatAreaRef"
           :selected-contact="selectedContact"
           :current-user-id="currentUserId"
           :current-user="currentUser"
@@ -15,7 +16,7 @@
           @ai-chat="handleAiChat"
           @todo-created="handleTodoCreated"
         />
-        <AIPanel :current-user-id="currentUserId" :context-message="aiContextMessage" :todo-refresh-key="todoRefreshKey" />
+        <AIPanel :current-user-id="currentUserId" :context-message="aiContextMessage" :todo-refresh-key="todoRefreshKey" @preview-excel="handlePreviewExcel" />
       </div>
     </div>
   </div>
@@ -33,6 +34,7 @@ const selectedContact = ref(null)
 const refreshKey = ref(0)
 const aiContextMessage = ref(null)
 const todoRefreshKey = ref(0)
+const chatAreaRef = ref(null)
 
 const handleUserChange = (userId) => {
   currentUserId.value = userId
@@ -54,5 +56,12 @@ const handleAiChat = (message) => {
 
 const handleTodoCreated = () => {
   todoRefreshKey.value++
+}
+
+const handlePreviewExcel = async (data) => {
+  // data: { file_name: string }
+  if (chatAreaRef.value && chatAreaRef.value.previewExcelByName) {
+    chatAreaRef.value.previewExcelByName(data.file_name)
+  }
 }
 </script>

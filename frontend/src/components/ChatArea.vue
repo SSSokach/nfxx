@@ -35,6 +35,13 @@
           <div class="message-content" :class="{ file: message.message_type === 'file' }">
             <template v-if="message.message_type === 'file'">
               <a href="#" class="file-link" @click.prevent="previewFile(message.file_id)">📎 {{ message.file_name }}</a>
+              <button
+                v-if="selectedContact && selectedContact.is_group && isExcelFile(message.file_name)"
+                class="file-collect-btn"
+                :class="{ detected: message.file_collected }"
+                @click.stop="detectFileCollection(message)"
+                :disabled="message.detecting"
+              >{{ message.detecting ? '检测中...' : (message.file_collected ? '已生成待办 ✓' : '📋 生成待办') }}</button>
             </template>
             <template v-else>
               {{ message.content }}
@@ -219,20 +226,60 @@
     </div>
 
     <!-- File preview modal -->
-    <div class="file-preview-modal" v-if="previewFileData" @click.self="previewFileData = null">
+    <div class="file-preview-modal" v-if="previewFileData" @click.self="closePreview">
       <div class="file-preview-content">
         <div class="file-preview-header">
           <div class="file-preview-title">{{ previewFileData.name }}</div>
-          <button class="file-preview-close" @click="previewFileData = null">×</button>
+          <button class="file-preview-close" @click="closePreview">×</button>
         </div>
         <div class="file-preview-body">
-          <div class="markdown-content" v-html="renderMarkdown(previewFileData.content)"></div>
+          <!-- Excel 表格预览 -->
+          <template v-if="excelPreview">
+            <div v-if="excelLoading" class="excel-loading">加载Excel数据中...</div>
+            <div v-else-if="excelData && excelData.sheets">
+              <div class="excel-sheet-tabs" v-if="excelData.sheets.length > 1">
+                <button
+                  v-for="(sheet, idx) in excelData.sheets"
+                  :key="idx"
+                  class="excel-tab-btn"
+                  :class="{ active: activeSheet === idx }"
+                  @click="activeSheet = idx"
+                >{{ sheet.name }}</button>
+              </div>
+              <div class="excel-table-wrapper" v-if="excelData.sheets[activeSheet]">
+                <table class="excel-table">
+                  <tbody>
+                    <tr v-for="(row, rIdx) in excelData.sheets[activeSheet].rows" :key="rIdx" :class="{ 'header-row': rIdx === 0 }">
+                      <td class="row-num">{{ rIdx + 1 }}</td>
+                      <td
+                        v-for="(cell, cIdx) in row"
+                        :key="cIdx"
+                        :class="{ 'header-cell': rIdx === 0, 'editable-cell': rIdx > 0, 'cell-modified': isCellModified(rIdx, cIdx) }"
+                        :contenteditable="rIdx > 0"
+                        @blur="onCellEdit($event, rIdx, cIdx)"
+                        @keydown.enter.prevent="onCellEnter($event)"
+                      >{{ cell }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="excelChanges.length > 0" class="excel-unsaved-hint">
+                {{ excelChanges.length }} 处修改未保存，关闭时自动保存
+              </div>
+            </div>
+            <div v-else class="excel-loading">无法读取Excel文件</div>
+          </template>
+          <!-- 普通文件预览 -->
+          <template v-else>
+            <div class="markdown-content" v-html="renderMarkdown(previewFileData.content)"></div>
+          </template>
         </div>
         <div class="file-preview-actions">
-          <button class="file-action-btn secondary" @click="editFile(previewFileData)">编辑</button>
+          <button v-if="!excelPreview" class="file-action-btn secondary" @click="editFile(previewFileData)">编辑</button>
+          <button v-if="excelPreview && excelChanges.length > 0" class="file-action-btn primary" @click="saveExcelChanges">保存</button>
           <button class="file-action-btn secondary" @click="downloadFile(previewFileData)">下载</button>
           <button class="file-action-btn danger" @click="deleteFile(previewFileData)">删除</button>
-          <button class="file-action-btn secondary" @click="previewFileData = null">关闭</button>
+          <button class="file-action-btn secondary" @click="closePreview">关闭</button>
         </div>
       </div>
     </div>
@@ -263,7 +310,7 @@
 
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue';
-import { chatsApi, filesApi, favoritesApi, todosApi } from '../api';
+import { chatsApi, filesApi, favoritesApi, todosApi, fileCollectionApi } from '../api';
 import { marked } from 'marked';
 
 const props = defineProps({
@@ -281,7 +328,13 @@ const showFileUpload = ref(false);
 const uploadFileName = ref('');
 const uploadFileContent = ref('');
 const previewFileData = ref(null);
+const excelPreview = ref(false);
+const excelLoading = ref(false);
+const excelData = ref(null);
+const activeSheet = ref(0);
 const editingFile = ref(null);
+const excelChanges = ref([]); // [{row, col, value}]
+const excelSaving = ref(false);
 const editingFileContent = ref('');
 const uploadMode = ref('local');
 const selectedFile = ref(null);
@@ -337,13 +390,131 @@ const sendMessage = async () => {
 
 const previewFile = async (fileId) => {
   const res = await filesApi.getContent(fileId);
-  previewFileData.value = res.data;
+  const fileData = res.data;
+  // 检查是否为Excel文件
+  if (fileData.name && (fileData.name.endsWith('.xlsx') || fileData.name.endsWith('.xls'))) {
+    excelPreview.value = true;
+    excelLoading.value = true;
+    excelData.value = null;
+    activeSheet.value = 0;
+    excelChanges.value = [];
+    previewFileData.value = fileData;
+    try {
+      const excelRes = await filesApi.getExcel(fileId);
+      excelData.value = excelRes.data;
+    } catch (e) {
+      excelData.value = null;
+    }
+    excelLoading.value = false;
+  } else {
+    excelPreview.value = false;
+    previewFileData.value = fileData;
+  }
+};
+
+// ===== 文件收集检测 =====
+const isExcelFile = (fileName) => {
+  return fileName && fileName.match(/\.(xlsx|xls)$/i);
+};
+
+const detectFileCollection = async (message) => {
+  if (message.detecting) return;
+  message.detecting = true;
+  try {
+    const res = await fileCollectionApi.detectFromMessage(message.id);
+    if (res.data.detected) {
+      message.file_collected = true;
+      showToast(`已检测到文件收集请求：${res.data.total}人待填写，已生成${res.data.todos_created}个待办`);
+      emit('todo-created');
+    } else if (res.data.reason && res.data.reason.includes('已创建过')) {
+      // 已经创建过收集任务，标记为已收集
+      message.file_collected = true;
+      showToast('该文件已生成过待办');
+    } else {
+      showToast(res.data.reason || '未检测到文件收集请求');
+    }
+  } catch (e) {
+    showToast('检测失败');
+  }
+  message.detecting = false;
+};
+
+// ===== Excel 在线编辑 =====
+const isCellModified = (row, col) => {
+  return excelChanges.value.some(c => c.row === row && c.col === col);
+};
+
+const onCellEdit = (event, row, col) => {
+  const newValue = event.target.textContent.trim();
+  const sheet = excelData.value?.sheets?.[activeSheet.value];
+  if (!sheet) return;
+  const oldValue = sheet.rows[row]?.[col] ?? '';
+
+  if (newValue === oldValue) {
+    // 恢复原值，移除变更
+    excelChanges.value = excelChanges.value.filter(c => !(c.row === row && c.col === col));
+    return;
+  }
+
+  // 更新本地数据
+  sheet.rows[row][col] = newValue;
+
+  // 记录变更
+  const existing = excelChanges.value.findIndex(c => c.row === row && c.col === col);
+  if (existing >= 0) {
+    excelChanges.value[existing].value = newValue;
+  } else {
+    excelChanges.value.push({ row, col, value: newValue });
+  }
+};
+
+const onCellEnter = (event) => {
+  // 按回车后，光标移到下一个单元格
+  event.target.blur();
+};
+
+const saveExcelChanges = async () => {
+  if (excelChanges.value.length === 0 || !previewFileData.value) return;
+
+  excelSaving.value = true;
+  try {
+    await filesApi.saveExcel(previewFileData.value.id, {
+      sheet_index: activeSheet.value,
+      changes: excelChanges.value,
+      user_id: props.currentUserId,
+    });
+    excelChanges.value = [];
+    emit('todo-created');
+  } catch (e) {
+    // ignore
+  }
+  excelSaving.value = false;
+};
+
+const closePreview = async () => {
+  // 如果有未保存的 Excel 修改，先保存
+  if (excelPreview.value && excelChanges.value.length > 0) {
+    await saveExcelChanges();
+  }
+  // 重置状态
+  excelPreview.value = false;
+  excelChanges.value = [];
+  previewFileData.value = null;
 };
 
 const uploadFile = async () => {
   if (!uploadFileName.value.trim() || !uploadFileContent.value.trim()) return;
   const res = await filesApi.save(props.currentUserId, uploadFileName.value.trim(), uploadFileContent.value.trim());
-  await chatsApi.sendMessage(props.currentUserId, props.selectedContact.id, res.data.name, 'file', res.data.id);
+  const msgRes = await chatsApi.sendMessage(props.currentUserId, props.selectedContact.id, res.data.name, 'file', res.data.id);
+  // 如果是群聊中的Excel文件，自动检测文件收集请求
+  if (props.selectedContact.is_group && res.data.name.match(/\.(xlsx|xls)$/i)) {
+    try {
+      await fileCollectionApi.detectFromMessage(msgRes.data.id);
+      emit('todo-created');
+    } catch (e) {
+      // 检测失败不阻塞
+    }
+  }
   showFileUpload.value = false;
   uploadFileName.value = '';
   uploadFileContent.value = '';
@@ -383,7 +554,16 @@ const uploadLocalFile = async () => {
     const res = await filesApi.upload(props.currentUserId, formData);
     uploadProgress.value = 100;
     if (props.selectedContact) {
-      await chatsApi.sendMessage(props.currentUserId, props.selectedContact.id, res.data.name, 'file', res.data.id);
+      const msgRes = await chatsApi.sendMessage(props.currentUserId, props.selectedContact.id, res.data.name, 'file', res.data.id);
+      // 如果是群聊中的Excel文件，自动检测文件收集请求
+      if (props.selectedContact.is_group && res.data.name.match(/\.(xlsx|xls)$/i)) {
+        try {
+          await fileCollectionApi.detectFromMessage(msgRes.data.id);
+          emit('todo-created');
+        } catch (e) {
+          // 检测失败不阻塞
+        }
+      }
     }
     showToast(`已上传 ${res.data.name}`);
     showFileUpload.value = false;
@@ -652,6 +832,27 @@ watch(() => props.selectedContact, () => {
   loadMessages();
 }, { immediate: true });
 watch(() => props.currentUserId, loadMessages);
+
+// 暴露给父组件：通过文件名预览Excel
+const previewExcelByName = async (fileName) => {
+  // 先通过API获取文件列表，找到匹配的文件
+  try {
+    const res = await filesApi.getByName(fileName);
+    if (res.data && res.data.id) {
+      await previewFile(res.data.id);
+    }
+  } catch (e) {
+    // 如果API不支持，尝试从消息中查找
+    for (const msg of messages.value) {
+      if (msg.file_name && msg.file_name === fileName) {
+        await previewFile(msg.file_id);
+        return;
+      }
+    }
+  }
+};
+
+defineExpose({ previewExcelByName });
 </script>
 
 <style scoped>
@@ -1173,5 +1374,153 @@ watch(() => props.currentUserId, loadMessages);
 
 .smart-reply-trigger.active {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* ===== Excel Preview ===== */
+.excel-loading {
+  text-align: center;
+  padding: 40px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.excel-sheet-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 2px solid #e8eaf0;
+  padding-bottom: 4px;
+}
+
+.excel-tab-btn {
+  padding: 4px 12px;
+  border: 1px solid #e8eaf0;
+  border-radius: 4px 4px 0 0;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.excel-tab-btn.active {
+  background: #667eea;
+  color: #fff;
+  border-color: #667eea;
+}
+
+.excel-table-wrapper {
+  overflow: auto;
+  max-height: 500px;
+  border: 1px solid #e8eaf0;
+  border-radius: 6px;
+}
+
+.excel-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.excel-table td {
+  border: 1px solid #e8eaf0;
+  padding: 4px 10px;
+  min-width: 80px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.excel-table .row-num {
+  background: #f3f4f6;
+  color: #9ca3af;
+  text-align: center;
+  min-width: 40px;
+  font-size: 11px;
+  user-select: none;
+}
+
+.excel-table .header-row .header-cell {
+  background: #667eea;
+  color: #fff;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.excel-table tr:nth-child(even):not(.header-row) td {
+  background: #fafbfc;
+}
+
+.excel-table tr:hover:not(.header-row) td {
+  background: #f0f7ff;
+}
+
+.excel-table .editable-cell {
+  cursor: text;
+}
+
+.excel-table .editable-cell:focus {
+  outline: 2px solid #667eea;
+  outline-offset: -2px;
+  background: #fff !important;
+}
+
+.excel-table .cell-modified {
+  background: #fef9c3 !important;
+  color: #92400e;
+}
+
+.excel-unsaved-hint {
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: #fef9c3;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.file-action-btn.primary {
+  background: #667eea;
+  color: #fff;
+  border-color: #667eea;
+}
+
+.file-action-btn.primary:hover {
+  background: #5568d3;
+}
+
+/* ===== File Collection Button ===== */
+.file-collect-btn {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 10px;
+  border: 1px solid #667eea;
+  border-radius: 4px;
+  background: #fff;
+  color: #667eea;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.file-collect-btn:hover:not(:disabled) {
+  background: #667eea;
+  color: #fff;
+}
+
+.file-collect-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.file-collect-btn.detected {
+  background: #f0fdf4;
+  border-color: #16a34a;
+  color: #16a34a;
+  cursor: default;
 }
 </style>

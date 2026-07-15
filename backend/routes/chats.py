@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app import SessionLocal
-from models import Contact, Message, UserContact, User
+from models import Contact, Message, UserContact, User, FileCollectionTask
 from datetime import datetime
 from typing import Optional
 
@@ -57,6 +57,14 @@ def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
                     "sender_name": ref.sender.name,
                     "content": ref.content[:80]
                 }
+        # 检查是否已创建过文件收集任务
+        file_collected = False
+        if msg.message_type == "file" and msg.file_id:
+            existing_task = db.query(FileCollectionTask).filter(
+                FileCollectionTask.source_message_id == msg.id
+            ).first()
+            file_collected = existing_task is not None
+
         result.append({
             "id": msg.id,
             "sender_id": msg.sender_id,
@@ -65,6 +73,7 @@ def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
             "message_type": msg.message_type,
             "file_id": msg.file_id,
             "file_name": msg.file.name if msg.file else "",
+            "file_collected": file_collected,
             "created_at": msg.created_at.isoformat(),
             "is_self": msg.sender_id == user_id,
             "reply_to": reply_data

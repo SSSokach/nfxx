@@ -28,7 +28,11 @@ export const filesApi = {
     timeout: 60000
   }),
   download: (fileId) => `/api/files/download/${fileId}`,
-  delete: (fileId) => api.delete(`/files/delete/${fileId}`)
+  delete: (fileId) => api.delete(`/files/delete/${fileId}`),
+  getContent: (fileId) => api.get(`/files/content/${fileId}`),
+  getByName: (fileName) => api.get(`/files/by-name/${encodeURIComponent(fileName)}`),
+  getExcel: (fileId) => api.get(`/files/excel/${fileId}`),
+  saveExcel: (fileId, data) => api.put(`/files/excel/${fileId}`, data)
 }
 
 export const aiApi = {
@@ -80,4 +84,17 @@ export const emailsApi = {
 export const reportsApi = {
   fileSummary: (fileId) => api.post('/reports/file-summary', { file_id: fileId }, { timeout: 120000 }),
   workReport: (userId, startDate, endDate) => api.post(`/reports/work-report/${userId}`, { start_date: startDate, end_date: endDate }, { timeout: 120000 })
+}
+
+export const fileCollectionApi = {
+  create: (initiatorUserId, groupContactId, fileName, description, deadline, assigneeUserIds) =>
+    api.post(`/file-collection/create?initiator_user_id=${initiatorUserId}&group_contact_id=${groupContactId}&file_name=${encodeURIComponent(fileName)}&description=${encodeURIComponent(description)}${deadline ? `&deadline=${deadline}` : ''}&assignee_user_ids=${assigneeUserIds}`),
+  detectFromMessage: (messageId) =>
+    api.post(`/file-collection/detect-from-message/${messageId}`, {}, { timeout: 120000 }),
+  scanProgress: (taskId) =>
+    api.post(`/file-collection/scan-progress/${taskId}`, {}, { timeout: 120000 }),
+  getTasks: (userId) => api.get(`/file-collection/tasks/${userId}`),
+  submitItem: (itemId, fileId) =>
+    api.post(`/file-collection/items/${itemId}/submit${fileId ? `?file_id=${fileId}` : ''}`),
+  getTaskDetail: (taskId) => api.get(`/file-collection/tasks/${taskId}/detail`)
 }

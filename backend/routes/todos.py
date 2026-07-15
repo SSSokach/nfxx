@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app import SessionLocal
 from models import (
     ChatSummary, ChatTodoItem, Message, Contact, UserContact, User,
-    CandidateTodo, ScannedMessage,
+    CandidateTodo, ScannedMessage, File, FileCollectionTask,
 )
 from datetime import datetime
 from typing import Optional
@@ -550,10 +550,74 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
                 scanned_at=datetime.utcnow(),
             ))
 
+    # === 扫描 Excel 文件收集请求 ===
+    # 查找所有群聊中未处理的 Excel 文件消息（包括自己发送的）
+    file_msgs = db.query(Message).filter(
+        Message.contact_id.in_(contact_ids),
+        Message.message_type == "file",
+        Message.file_id.isnot(None),
+    ).order_by(Message.created_at.desc()).limit(50).all()
+
+    file_detected = 0
+    for fm in file_msgs:
+        # 检查是否已处理过
+        if fm.id in processed_ids:
+            continue
+        # 检查是否已创建过文件收集任务
+        existing_task = db.query(FileCollectionTask).filter(
+            FileCollectionTask.source_message_id == fm.id
+        ).first()
+        if existing_task:
+            # 标记为已扫描
+            already = db.query(ScannedMessage).filter(
+                ScannedMessage.user_id == user_id,
+                ScannedMessage.message_id == fm.id,
+            ).first()
+            if not already:
+                db.add(ScannedMessage(
+                    user_id=user_id,
+                    message_id=fm.id,
+                    scanned_at=datetime.utcnow(),
+                ))
+            continue
+
+        # 检查文件是否为 Excel
+        file_obj = db.query(File).filter(File.id == fm.file_id).first()
+        if not file_obj or not file_obj.name.lower().endswith((".xlsx", ".xls")):
+            continue
+
+        # 检查是否在群聊中
+        contact = next((c for c in all_contacts if c.id == fm.contact_id), None)
+        if not contact or not contact.is_group:
+            continue
+
+        # 调用文件收集检测
+        try:
+            from routes.file_collection import _detect_file_collection
+            result = _detect_file_collection(fm.id, db)
+            if result.get("detected"):
+                file_detected += 1
+                new_count += result.get("todos_created", 0)
+        except Exception:
+            pass
+
+        # 标记为已扫描
+        already = db.query(ScannedMessage).filter(
+            ScannedMessage.user_id == user_id,
+            ScannedMessage.message_id == fm.id,
+        ).first()
+        if not already:
+            db.add(ScannedMessage(
+                user_id=user_id,
+                message_id=fm.id,
+                scanned_at=datetime.utcnow(),
+            ))
+
     db.commit()
     return {
         "new_count": new_count,
-        "message": f"扫描完成：检测 {len(unprocessed)} 条新消息，发现 {new_count} 条候选待办",
+        "file_detected": file_detected,
+        "message": f"扫描完成：检测 {len(unprocessed)} 条新消息，发现 {new_count} 条候选待办" + (f"，检测到 {file_detected} 个文件收集请求" if file_detected > 0 else ""),
         "scanned_total": len(unprocessed),
         "already_processed": len(recent_msgs) - len(unprocessed),
     }

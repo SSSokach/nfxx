@@ -170,6 +170,35 @@ class ScannedMessage(Base):
     scanned_at = Column(DateTime, default=datetime.utcnow)
 
 
+class FileCollectionTask(Base):
+    """文件收集任务表 - 发起人创建的文件收集任务"""
+    __tablename__ = "file_collection_task"
+    id = Column(Integer, primary_key=True, index=True)
+    initiator_user_id = Column(Integer, ForeignKey("users.id"))
+    source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
+    group_name = Column(String, nullable=True)
+    file_name = Column(String)
+    description = Column(Text, default="")
+    deadline = Column(Date, nullable=True)
+    status = Column(String, default="collecting")  # collecting / completed / cancelled
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    items = relationship("FileCollectionItem", backref="task", cascade="all, delete-orphan")
+
+
+class FileCollectionItem(Base):
+    """文件收集明细表 - 每个待填写人的填写状态"""
+    __tablename__ = "file_collection_item"
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("file_collection_task.id"))
+    assignee_user_id = Column(Integer, ForeignKey("users.id"))
+    assignee_name = Column(String)
+    status = Column(String, default="pending")  # pending / submitted
+    submitted_file_id = Column(Integer, ForeignKey("files.id"), nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Email(Base):
     """邮件表（模拟邮件系统）"""
     __tablename__ = "emails"
