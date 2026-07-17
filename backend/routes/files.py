@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File as FastAPIFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from app import SessionLocal
+from dependencies import get_db
 from models import File
 from datetime import datetime
 import os
@@ -11,13 +11,6 @@ router = APIRouter()
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.get("/{user_id}")
 def get_files(user_id: int, db: Session = Depends(get_db)):

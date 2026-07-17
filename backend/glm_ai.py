@@ -624,7 +624,6 @@ def chat_with_ai(user_id, user_name, message, history=None):
     if not API_KEY:
         return {
             "response": "AI 助手未配置 API Key，请在 backend/.env 中设置 OPENAI_API_KEY。",
-            "result": None
         }
 
     registry = build_registry(user_id, user_name)
@@ -638,7 +637,6 @@ def chat_with_ai(user_id, user_name, message, history=None):
             messages.append(h)
     messages.append({"role": "user", "content": message})
 
-    tool_calls_log = []
     tools = registry.get_schemas()
 
     for _ in range(5):
@@ -654,11 +652,6 @@ def chat_with_ai(user_id, user_name, message, history=None):
             messages.append(msg)
             for tc in msg.tool_calls:
                 result = registry.execute(tc.function.name, tc.function.arguments)
-                tool_calls_log.append({
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                    "result": result,
-                })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -669,9 +662,9 @@ def chat_with_ai(user_id, user_name, message, history=None):
             content = msg.content or ""
             if not content and hasattr(msg, "reasoning_content") and msg.reasoning_content:
                 content = msg.reasoning_content
-            return {"response": content, "result": tool_calls_log if tool_calls_log else None}
+            return {"response": content}
 
-    return {"response": "工具调用次数过多，已终止。", "result": tool_calls_log}
+    return {"response": "工具调用次数过多，已终止。"}
 
 
 # ===== 场景化 AI 调用函数 =====
@@ -983,11 +976,18 @@ def generate_daily_digest(user_id):
         EmailTodoItem.completed_at <= today_end,
     ).all()
 
+    # 在 db.close() 之前，预查询联系人信息
+    contact_map = {}
+    contact_ids_in_msgs = {m.contact_id for m in today_msgs[:30]}
+    if contact_ids_in_msgs:
+        contacts = db.query(Contact).filter(Contact.id.in_(contact_ids_in_msgs)).all()
+        contact_map = {c.id: c for c in contacts}
+
     db.close()
 
     msg_lines = []
     for m in today_msgs[:30]:
-        contact = db.query(Contact).filter(Contact.id == m.contact_id).first()
+        contact = contact_map.get(m.contact_id)
         contact_name = contact.name if contact else ""
         msg_lines.append(f"[{m.created_at.strftime('%H:%M')}] {contact_name} - {m.sender.name}: {m.content[:80]}")
     messages_text = "\n".join(msg_lines) if msg_lines else "今日无消息"

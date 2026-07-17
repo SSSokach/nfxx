@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routes import users, chats, files, ai, favorites, todos, emails, reports
+from routes import users, chats, files, ai, favorites, todos, emails, reports, forms, online_forms
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(chats.router, prefix="/api/chats", tags=["chats"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
@@ -30,6 +30,12 @@ app.include_router(favorites.router, prefix="/api/favorites", tags=["favorites"]
 app.include_router(todos.router, prefix="/api/todos", tags=["todos"])
 app.include_router(emails.router, prefix="/api/emails", tags=["emails"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
+app.include_router(forms.router, prefix="/api/forms", tags=["forms"])
+app.include_router(online_forms.router, prefix="/api/online-forms", tags=["online-forms"])
+
+# 自动创建缺失的表（不会影响已有表）
+import models
+models.Base.metadata.create_all(bind=engine)
 
 frontend_dist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 if os.path.exists(frontend_dist_path):

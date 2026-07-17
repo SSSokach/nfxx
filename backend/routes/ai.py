@@ -1,18 +1,12 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from app import SessionLocal
+from dependencies import get_db
 from models import User, Message, Contact, UserContact
 from typing import Optional
 import glm_ai
+from token_limiter import check_rate_limit, apply_slowdown, record_usage, estimate_tokens
 
 router = APIRouter()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.get("/tools")
 def get_tools():
@@ -37,10 +31,35 @@ def ai_chat(user_id: int, message: str, db: Session = Depends(get_db)):
     """与 GLM AI 对话，支持 function calling 工具调用。"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        return {"response": "用户不存在", "result": None}
+        return {"response": "用户不存在"}
+
+    # 检查用量限制
+    limit_check = check_rate_limit(user_id)
+    if not limit_check["allowed"]:
+        return {
+            "response": f"⚠️ {limit_check['reason']}\n\n今日已使用：{limit_check['usage']['request_count']}次请求 / {limit_check['usage']['token_count']} tokens\n每日限额：{limit_check['limits']['request_count']}次请求 / {limit_check['limits']['token_count']} tokens",
+            "usage": limit_check["usage"],
+            "limits": limit_check["limits"],
+        }
+
+    # 根据用量施加延迟（控制响应速度）
+    delay = apply_slowdown(user_id)
 
     result = glm_ai.chat_with_ai(user_id, user.name, message)
-    return result
+
+    # 记录用量
+    input_tokens = estimate_tokens(message)
+    output_tokens = estimate_tokens(result.get("response", ""))
+    record_usage(user_id, input_tokens + output_tokens)
+
+    return {**result, "usage": limit_check["usage"], "limits": limit_check["limits"], "delay": delay}
+
+
+@router.get("/usage/{user_id}")
+def get_usage(user_id: int):
+    """获取用户今日AI用量"""
+    from token_limiter import check_rate_limit
+    return check_rate_limit(user_id)
 
 
 # ===== 新增 AI 功能端点 =====

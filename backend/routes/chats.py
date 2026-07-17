@@ -1,18 +1,11 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from app import SessionLocal
+from dependencies import get_db
 from models import Contact, Message, UserContact, User
 from datetime import datetime
 from typing import Optional
 
 router = APIRouter()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.get("/contacts/{user_id}")
 def get_contacts(user_id: int, db: Session = Depends(get_db)):

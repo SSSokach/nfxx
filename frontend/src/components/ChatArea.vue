@@ -41,13 +41,13 @@
             </template>
           </div>
           <div class="message-time">{{ formatTime(message.created_at) }}</div>
-          <!-- Todo creation prompt (below the last received message) -->
-          <div class="todo-prompt-inline" v-if="isTodoPromptFor(message)">
+          <!-- Todo creation prompt (below the last received message) - disabled per user request -->
+          <!-- <div class="todo-prompt-inline" v-if="isTodoPromptFor(message)">
             <span class="todo-prompt-label">是否创建待办：</span>
             <span class="todo-prompt-content">{{ getTodoTitle(message) }}</span>
             <button class="todo-prompt-btn create" @click.stop="createTodoFromMessage(message)">创建</button>
             <button class="todo-prompt-btn dismiss" @click.stop="dismissTodoPrompt(message)">忽略</button>
-          </div>
+          </div> -->
         </div>
       </div>
     </div>
@@ -86,6 +86,8 @@
         <button class="smart-reply-panel-close" @click="smartReplyVisible = false">×</button>
       </div>
       <div class="smart-reply-list">
+        <div class="smart-reply-loading" v-if="smartReplyLoading">AI 正在生成回复...</div>
+        <div class="smart-reply-empty" v-else-if="smartReplies.length === 0">暂无回复建议</div>
         <button
           v-for="(reply, idx) in smartReplies"
           :key="idx"
@@ -263,7 +265,7 @@
 
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue';
-import { chatsApi, filesApi, favoritesApi, todosApi } from '../api';
+import { chatsApi, filesApi, favoritesApi, todosApi, aiApi } from '../api';
 import { marked } from 'marked';
 
 const props = defineProps({
@@ -318,7 +320,6 @@ const loadMessages = async () => {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
     }
   });
-  checkLastMessage();
 };
 
 const sendMessage = async () => {
@@ -528,12 +529,36 @@ const handleAiChat = () => {
   showToast('已发送到AI助手');
 };
 
-// === Smart reply (button-triggered) ===
-const smartReplies = ['智能回复1', '智能回复2', '智能回复3'];
+// === Smart reply (button-triggered, AI-powered) ===
+const smartReplies = ref([]);
 const smartReplyVisible = ref(false);
+const smartReplyLoading = ref(false);
 
-const toggleSmartReply = () => {
-  smartReplyVisible.value = !smartReplyVisible.value;
+const toggleSmartReply = async () => {
+  if (smartReplyVisible.value) {
+    smartReplyVisible.value = false;
+    return;
+  }
+  // 获取对方最后一条消息
+  const lastMsg = lastReceivedMsg.value;
+  if (!lastMsg) {
+    showToast('没有可回复的消息');
+    return;
+  }
+  smartReplyVisible.value = true;
+  smartReplyLoading.value = true;
+  smartReplies.value = [];
+  try {
+    const res = await aiApi.smartReply(props.currentUserId, lastMsg.content, props.selectedContact?.id);
+    smartReplies.value = res.data.replies || [];
+    if (smartReplies.value.length === 0) {
+      showToast('未生成回复建议');
+    }
+  } catch (e) {
+    showToast('生成回复失败');
+    smartReplies.value = [];
+  }
+  smartReplyLoading.value = false;
 };
 
 const useSmartReply = (reply) => {
@@ -583,11 +608,6 @@ const createTodoFromMessage = async (message) => {
 
 const dismissTodoPrompt = (message) => {
   dismissedTodoMsgs.value.add(message.id);
-};
-
-// Check last message (scroll to bottom, hide smart reply if self sent)
-const checkLastMessage = () => {
-  // No automatic actions needed; todo prompt is inline, smart reply is button-triggered
 };
 
 // === Multi-select handlers ===
