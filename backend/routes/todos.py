@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from app import SessionLocal
+from dependencies import get_db
 from models import (
     ChatSummary, ChatTodoItem, Message, Contact, UserContact, User,
     CandidateTodo, ScannedMessage, File, FileCollectionTask,
@@ -12,14 +12,6 @@ from typing import Optional
 import glm_ai
 
 router = APIRouter()
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _parse_deadline(deadline_str):

@@ -48,7 +48,8 @@ export const aiApi = {
   prioritizeTodos: (userId) =>
     api.post(`/ai/prioritize-todos/${userId}`, {}, { timeout: 60000 }),
   meetingMinutes: (userId, contactId) =>
-    api.post(`/ai/meeting-minutes?user_id=${userId}&contact_id=${contactId}`, {}, { timeout: 120000 })
+    api.post(`/ai/meeting-minutes?user_id=${userId}&contact_id=${contactId}`, {}, { timeout: 120000 }),
+  getUsage: (userId) => api.get(`/ai/usage/${userId}`)
 }
 
 export const favoritesApi = {
@@ -97,4 +98,28 @@ export const fileCollectionApi = {
   submitItem: (itemId, fileId) =>
     api.post(`/file-collection/items/${itemId}/submit${fileId ? `?file_id=${fileId}` : ''}`),
   getTaskDetail: (taskId) => api.get(`/file-collection/tasks/${taskId}/detail`)
+}
+
+export const formsApi = {
+  create: (userId, contactId, formName, requiredMembers, formUrl) =>
+    api.post(`/forms/${userId}/create?contact_id=${contactId}&form_name=${encodeURIComponent(formName)}&required_members=${encodeURIComponent(requiredMembers)}${formUrl ? '&form_url=' + encodeURIComponent(formUrl) : ''}`),
+  getList: (userId, status) =>
+    api.get(`/forms/${userId}${status ? `?status=${status}` : ''}`),
+  check: (trackerId) =>
+    api.post(`/forms/${trackerId}/check`),
+  remind: (trackerId) =>
+    api.post(`/forms/${trackerId}/remind`),
+  cancel: (trackerId) =>
+    api.post(`/forms/${trackerId}/cancel`),
+  checkAll: (userId) =>
+    api.post(`/forms/check-all/${userId}`),
+}
+
+export const onlineFormsApi = {
+  create: (data) => api.post('/online-forms/create', data),
+  get: (formId) => api.get(`/online-forms/${formId}`),
+  fill: (formId, memberName, data) => api.post(`/online-forms/${formId}/fill`, { member_name: memberName, data }),
+  check: (formId) => api.post(`/online-forms/${formId}/check`),
+  list: (userId) => api.get(`/online-forms/list/${userId}`),
+  close: (formId) => api.post(`/online-forms/${formId}/close`),
 }

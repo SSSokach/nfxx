@@ -41,14 +41,7 @@
           >
             <template v-if="msg.role === 'user'">{{ msg.content }}</template>
             <template v-else>
-              {{ msg.content }}
-              <div
-                v-if="msg.result"
-                class="ai-message-result"
-              >
-                <strong>执行结果:</strong>
-                <pre>{{ JSON.stringify(msg.result, null, 2) }}</pre>
-              </div>
+              <div class="ai-message-markdown" v-html="renderMarkdown(msg.content)"></div>
             </template>
           </div>
           <div v-if="aiLoading" class="ai-message assistant">处理中...</div>
@@ -74,6 +67,16 @@
             :disabled="aiLoading"
             @click="fillPrompt(btn.prompt)"
           >{{ btn.label }}</button>
+        </div>
+
+        <div class="ai-usage-bar" v-if="aiUsage.request_count > 0 || aiUsage.token_count > 0">
+          <div class="ai-usage-info">
+            今日用量：{{ aiUsage.request_count }}/{{ aiUsage.limits?.request_count || 50 }} 次请求 · {{ aiUsage.token_count }}/{{ aiUsage.limits?.token_count || 50000 }} tokens
+          </div>
+          <div class="ai-usage-progress">
+            <div class="ai-usage-fill" :style="{width: usagePercent + '%'}" :class="usageLevel"></div>
+          </div>
+          <div class="ai-usage-hint" v-if="usagePercent > 60">⚠️ 用量较高，AI响应已降速</div>
         </div>
 
         <div class="ai-input-area">
@@ -188,13 +191,77 @@
           </div>
         </div>
       </div>
+
+      <!-- ===== Forms Tab ===== -->
+      <div v-show="activeTab === 'forms'" class="tab-pane tab-pane-forms">
+        <div class="forms-scroll">
+          <!-- Create online form -->
+          <div class="forms-toolbar">
+            <select v-model="formTrackerContactId" class="form-select">
+              <option value="">选择群聊</option>
+              <option v-for="c in contactsForForms" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <input v-model="formTrackerName" class="form-input" placeholder="表格名称" />
+            <input v-model="formTrackerMembers" class="form-input" placeholder="需填写人员(逗号分隔)" />
+          </div>
+          <div class="forms-columns-row" v-if="formTrackerName">
+            <input v-model="formColumnInput" class="form-input" placeholder="自定义列名(逗号分隔)，如: 周报,进度,备注" style="flex:1" />
+          </div>
+          <div class="forms-actions-row">
+            <button class="form-btn" @click="createOnlineForm" :disabled="!formTrackerContactId || !formTrackerName || !formTrackerMembers">📋 创建在线表格</button>
+            <button class="form-btn ghost" @click="createFormTracker" :disabled="!formTrackerContactId || !formTrackerName || !formTrackerMembers">仅追踪</button>
+            <button class="form-btn secondary" @click="checkAllForms" :disabled="formsChecking">
+              {{ formsChecking ? '检测中...' : '🔍 一键检测' }}
+            </button>
+          </div>
+
+          <div v-if="formTrackers.length === 0" class="pane-empty">暂无表格追踪</div>
+          <div v-for="t in formTrackers" :key="t.id" class="form-tracker-item">
+            <div class="form-tracker-header">
+              <span class="form-tracker-name">{{ t.form_name }}</span>
+              <span class="form-progress-badge" :class="t.status">{{ t.progress }} {{ t.status === 'completed' ? '✓' : '' }}</span>
+            </div>
+            <div class="form-tracker-body">
+              <div class="form-members">
+                <span class="form-member-label">已填：</span>
+                <span v-for="m in t.filled_members" :key="m" class="form-member-tag done">{{ m }}</span>
+                <span v-if="t.filled_members.length === 0" class="form-member-empty">无</span>
+              </div>
+              <div class="form-members" v-if="t.unfilled_members.length > 0">
+                <span class="form-member-label">未填：</span>
+                <span v-for="m in t.unfilled_members" :key="m" class="form-member-tag pending">{{ m }}</span>
+              </div>
+              <div class="form-tracker-meta" v-if="t.last_checked">上次检测：{{ t.last_checked }}</div>
+            </div>
+            <div class="form-tracker-actions" v-if="t.status === 'tracking'">
+              <button class="form-btn small" @click="checkForm(t.id)">检测</button>
+              <button class="form-btn small info" v-if="t.form_url && t.form_url.includes('online-forms')" @click="openOnlineForm(t.form_url)">查看表格</button>
+              <button class="form-btn small warn" @click="remindForm(t.id)" v-if="t.unfilled_members.length > 0">@催办</button>
+              <button class="form-btn small danger" @click="cancelForm(t.id)">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <!-- Online Form Modal -->
+    <OnlineFormModal
+      :visible="onlineFormVisible"
+      :formId="onlineFormId"
+      @close="onlineFormVisible = false"
+      @remind="handleRemindFromModal"
+      @updated="loadFormTrackers"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed } from 'vue'
-import { aiApi, todosApi, emailsApi, fileCollectionApi } from '../api'
+import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { aiApi, todosApi, emailsApi, fileCollectionApi, formsApi, chatsApi, onlineFormsApi } from '../api'
+import OnlineFormModal from './OnlineFormModal.vue'
+import { marked } from 'marked'
+
+marked.setOptions({ breaks: true })
 
 const props = defineProps({
   currentUserId: Number,
@@ -208,7 +275,8 @@ const emit = defineEmits(['preview-excel'])
 const activeTab = ref('chat')
 const tabs = [
   { key: 'chat', label: 'AI对话', icon: '💬' },
-  { key: 'todo', label: '待办', icon: '📋' }
+  { key: 'todo', label: '待办', icon: '📋' },
+  { key: 'forms', label: '表格追踪', icon: '📊' }
 ]
 
 const currentUserLabel = computed(() => {
@@ -223,6 +291,37 @@ const switchTab = (key) => {
     loadCandidates()
     loadFileCollectionTasks()
   }
+  if (key === 'forms') {
+    loadFormTrackers()
+    loadContactsForForms()
+  }
+  if (key === 'chat') {
+    loadUsage()
+  }
+}
+
+// ===== AI Usage (token 限速) =====
+const aiUsage = ref({ request_count: 0, token_count: 0 })
+
+const usagePercent = computed(() => {
+  const reqPct = aiUsage.value.request_count / (aiUsage.value.limits?.request_count || 50) * 100
+  const tokenPct = aiUsage.value.token_count / (aiUsage.value.limits?.token_count || 50000) * 100
+  return Math.min(100, Math.max(reqPct, tokenPct))
+})
+
+const usageLevel = computed(() => {
+  if (usagePercent.value > 80) return 'danger'
+  if (usagePercent.value > 60) return 'warn'
+  return 'normal'
+})
+
+const loadUsage = async () => {
+  if (!props.currentUserId) return
+  try {
+    const res = await aiApi.getUsage(props.currentUserId)
+    aiUsage.value = res.data.usage || { request_count: 0, token_count: 0 }
+    aiUsage.value.limits = res.data.limits
+  } catch (e) {}
 }
 
 // ===== AI Chat =====
@@ -235,15 +334,20 @@ const localContext = ref(null)
 const aiMessagesContainer = ref(null)
 const hasUserSentMessage = ref(false)
 
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  return marked.parse(text)
+}
+
 const showQuickBubbles = computed(() => !hasUserSentMessage.value)
 
 // Quick prompt bubbles - click to fill input (not send)
 const quickBubbles = [
-  { label: '📄 总结文件内容', prompt: '请帮我总结文件内容' },
-  { label: '📊 生成工作报告', prompt: '帮我总结一下我本周的主要工作内容' },
-  { label: '📋 查看待办列表', prompt: '查看我的待办列表' },
-  { label: '👥 查看联系人', prompt: '查看联系人列表' },
-  { label: '💬 查看最近消息', prompt: '查看最近消息' }
+  // { label: '📄 总结文件内容', prompt: '请帮我总结文件内容' },
+  // { label: '📊 生成工作报告', prompt: '帮我总结一下我本周的主要工作内容' },
+  // { label: '📋 查看待办列表', prompt: '查看我的待办列表' },
+  // { label: '👥 查看联系人', prompt: '查看联系人列表' },
+  // { label: '💬 查看最近消息', prompt: '查看最近消息' }
 ]
 
 const scrollToBottom = () => {
@@ -417,7 +521,10 @@ const sendAiMessage = async (overrideMsg) => {
 
   try {
     const res = await aiApi.chat(props.currentUserId, prompt)
-    aiMessages.value.push({ role: 'assistant', content: res.data.response, result: res.data.result })
+    aiMessages.value.push({ role: 'assistant', content: res.data.response })
+    if (res.data.usage) {
+      aiUsage.value = { ...res.data.usage, limits: res.data.limits }
+    }
   } catch (error) {
     aiMessages.value.push({ role: 'assistant', content: '抱歉，我遇到了一个错误。' })
   }
@@ -572,6 +679,131 @@ const dismissCandidate = async (c) => {
     todoError.value = '操作失败'
   }
 }
+
+onMounted(() => {
+  loadUsage()
+})
+
+// ===== Form Tracker =====
+const formTrackers = ref([])
+const formTrackerContactId = ref('')
+const formTrackerName = ref('')
+const formTrackerMembers = ref('')
+const formColumnInput = ref('')
+const formsChecking = ref(false)
+const contactsForForms = ref([])
+const onlineFormVisible = ref(false)
+const onlineFormId = ref(null)
+
+const loadFormTrackers = async () => {
+  if (!props.currentUserId) return
+  try {
+    const res = await formsApi.getList(props.currentUserId)
+    formTrackers.value = res.data || []
+  } catch (e) {}
+}
+
+const loadContactsForForms = async () => {
+  if (!props.currentUserId) return
+  try {
+    const res = await chatsApi.getContacts(props.currentUserId)
+    // 只显示群聊
+    contactsForForms.value = (res.data || []).filter(c => c.is_group)
+  } catch (e) {}
+}
+
+const createFormTracker = async () => {
+  if (!formTrackerContactId.value || !formTrackerName.value || !formTrackerMembers.value) return
+  try {
+    await formsApi.create(props.currentUserId, formTrackerContactId.value, formTrackerName.value, formTrackerMembers.value)
+    formTrackerName.value = ''
+    formTrackerMembers.value = ''
+    formColumnInput.value = ''
+    await loadFormTrackers()
+  } catch (e) {
+    todoError.value = '创建追踪失败'
+  }
+}
+
+const createOnlineForm = async () => {
+  if (!formTrackerContactId.value || !formTrackerName.value || !formTrackerMembers.value) return
+  try {
+    // 构建列定义：只使用用户自定义列，填写人由系统自动记录
+    const customCols = formColumnInput.value
+      ? formColumnInput.value.split(',').map(s => s.trim()).filter(Boolean)
+      : ['填写内容']
+    const columns = customCols.map((label, i) => ({ key: `col_${i}`, label }))
+    const members = formTrackerMembers.value.split(',').map(s => s.trim()).filter(Boolean)
+    const res = await onlineFormsApi.create({
+      creator_id: props.currentUserId,
+      contact_id: parseInt(formTrackerContactId.value),
+      title: formTrackerName.value,
+      columns: columns,
+      required_members: members,
+    })
+    formTrackerName.value = ''
+    formTrackerMembers.value = ''
+    formColumnInput.value = ''
+    await loadFormTrackers()
+    // 打开刚创建的表格
+    if (res.data.id) {
+      onlineFormId.value = res.data.id
+      onlineFormVisible.value = true
+    }
+  } catch (e) {
+    todoError.value = '创建在线表格失败'
+  }
+}
+
+const openOnlineForm = (formUrl) => {
+  const formId = parseInt(formUrl.split('/').pop())
+  if (formId) {
+    onlineFormId.value = formId
+    onlineFormVisible.value = true
+  }
+}
+
+const handleRemindFromModal = (formId) => {
+  // 从弹窗触发催办 — 找到对应的 tracker 并调用 remind
+  const tracker = formTrackers.value.find(t => t.form_url && t.form_url.includes(`online-forms/${formId}`))
+  if (tracker) {
+    remindForm(tracker.id)
+  }
+}
+
+const checkForm = async (id) => {
+  try {
+    const res = await formsApi.check(id)
+    await loadFormTrackers()
+  } catch (e) {}
+}
+
+const remindForm = async (id) => {
+  try {
+    const res = await formsApi.remind(id)
+    alert(res.data.message)
+    await loadFormTrackers()
+  } catch (e) {
+    todoError.value = '催办失败'
+  }
+}
+
+const cancelForm = async (id) => {
+  try {
+    await formsApi.cancel(id)
+    await loadFormTrackers()
+  } catch (e) {}
+}
+
+const checkAllForms = async () => {
+  if (!props.currentUserId || formsChecking.value) return
+  formsChecking.value = true
+  try {
+    await formsApi.checkAll(props.currentUserId)
+    await loadFormTrackers()
+  } catch (e) {}
+  formsChecking.value = false
+}
 </script>
 
 <style scoped>
@@ -723,19 +955,94 @@ const dismissCandidate = async (c) => {
   color: #333;
 }
 
-/* ===== AI message result ===== */
-.ai-message-result {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 4px;
-  font-size: 12px;
+/* ===== AI message markdown ===== */
+.ai-message-markdown {
+  line-height: 1.7;
+  word-break: break-word;
 }
 
-.ai-message-result pre {
-  margin-top: 4px;
-  white-space: pre-wrap;
+.ai-message-markdown :deep(h1),
+.ai-message-markdown :deep(h2),
+.ai-message-markdown :deep(h3),
+.ai-message-markdown :deep(h4) {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-message-markdown :deep(h1) { font-size: 18px; }
+.ai-message-markdown :deep(h2) { font-size: 16px; }
+.ai-message-markdown :deep(h3) { font-size: 15px; }
+.ai-message-markdown :deep(h4) { font-size: 14px; }
+
+.ai-message-markdown :deep(p) {
+  margin: 6px 0;
+}
+
+.ai-message-markdown :deep(ul),
+.ai-message-markdown :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.ai-message-markdown :deep(li) {
+  margin: 3px 0;
+}
+
+.ai-message-markdown :deep(strong) {
+  font-weight: 600;
+}
+
+.ai-message-markdown :deep(code) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 13px;
   font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.ai-message-markdown :deep(pre) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.ai-message-markdown :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.ai-message-markdown :deep(blockquote) {
+  border-left: 3px solid #d1d5db;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #6b7280;
+}
+
+.ai-message-markdown :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.ai-message-markdown :deep(th),
+.ai-message-markdown :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.ai-message-markdown :deep(th) {
+  background: rgba(0, 0, 0, 0.03);
+  font-weight: 600;
+}
+
+.ai-message-markdown :deep(hr) {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 12px 0;
 }
 
 /* ===== Header actions ===== */
@@ -1091,6 +1398,7 @@ const dismissCandidate = async (c) => {
   margin-bottom: 8px;
 }
 
+<<<<<<< HEAD
 /* ===== File Collection inline progress in todo list ===== */
 .fc-progress-inline {
   margin-top: 8px;
@@ -1170,4 +1478,126 @@ const dismissCandidate = async (c) => {
   color: #9ca3af;
   margin-top: 8px;
 }
+
+/* ===== AI Usage Bar ===== */
+.ai-usage-bar {
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.ai-usage-info {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+.ai-usage-progress {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ai-usage-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.ai-usage-fill.normal { background: #3b82f6; }
+.ai-usage-fill.warn { background: #f59e0b; }
+.ai-usage-fill.danger { background: #ef4444; }
+.ai-usage-hint {
+  font-size: 11px;
+  color: #f59e0b;
+  margin-top: 4px;
+}
+
+/* ===== Form Tracker ===== */
+.tab-pane-forms {
+  overflow: hidden;
+}
+.forms-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.forms-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.forms-columns-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.forms-actions-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.form-btn.ghost { background: #e5e7eb; color: #374151; }
+.form-btn.info { background: #6366f1; }
+.form-select, .form-input {
+  padding: 6px 10px;
+  border: 1px solid #dde0e6;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+.form-select { flex: 0 0 120px; }
+.form-input { flex: 1; min-width: 80px; }
+.form-btn {
+  padding: 6px 14px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.form-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.form-btn.secondary { background: #6366f1; }
+.form-btn.small { padding: 3px 10px; font-size: 12px; }
+.form-btn.warn { background: #f59e0b; }
+.form-btn.danger { background: #ef4444; }
+.form-btn:hover:not(:disabled) { opacity: 0.9; }
+.form-tracker-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+.form-tracker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.form-tracker-name { font-weight: 600; font-size: 14px; }
+.form-progress-badge {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: #dbeafe;
+  color: #2563eb;
+}
+.form-progress-badge.completed { background: #d1fae5; color: #059669; }
+.form-progress-badge.cancelled { background: #f3f4f6; color: #9ca3af; }
+.form-tracker-body { font-size: 13px; }
+.form-members { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.form-member-label { color: #6b7280; font-size: 12px; }
+.form-member-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.form-member-tag.done { background: #d1fae5; color: #059669; }
+.form-member-tag.pending { background: #fef3c7; color: #d97706; }
+.form-member-empty { color: #9ca3af; font-size: 12px; }
+.form-tracker-meta { color: #9ca3af; font-size: 11px; margin-top: 4px; }
+.form-tracker-actions { display: flex; gap: 6px; margin-top: 8px; }
 </style>

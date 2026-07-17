@@ -1,17 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app import SessionLocal
+from dependencies import get_db
 from models import Favorite, Message
 from datetime import datetime
 
 router = APIRouter()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.get("/{user_id}")
 def get_favorites(user_id: int, db: Session = Depends(get_db)):

@@ -213,3 +213,55 @@ class Email(Base):
     reply_to_email_id = Column(Integer, nullable=True)
     sent_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FormTracker(Base):
+    """在线表格追踪表"""
+    __tablename__ = "form_tracker"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))  # 表格创建人/追踪人
+    contact_id = Column(Integer, ForeignKey("contacts.id"))  # 所在群聊
+    form_name = Column(String)  # 表格名称
+    form_url = Column(Text, nullable=True)  # 表格链接（可选）
+    required_members = Column(Text)  # 需要填写的人员名单，逗号分隔
+    filled_members = Column(Text, default="")  # 已填写人员，逗号分隔
+    status = Column(String, default="tracking")  # tracking / completed / cancelled
+    last_checked = Column(DateTime, nullable=True)  # 上次检测时间
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class OnlineForm(Base):
+    """在线表格表 - 存储表格定义和列结构"""
+    __tablename__ = "online_form"
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(Integer, ForeignKey("users.id"))  # 创建人
+    contact_id = Column(Integer, ForeignKey("contacts.id"))  # 关联群聊
+    title = Column(String)  # 表格标题
+    columns = Column(Text)  # 列定义 JSON: [{"key":"name","label":"姓名","type":"text"},{"key":"progress","label":"进度","type":"text"}]
+    required_members = Column(Text)  # 需要填写的人员名单，逗号分隔
+    status = Column(String, default="active")  # active / closed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class OnlineFormRow(Base):
+    """在线表格行数据 - 每人一行"""
+    __tablename__ = "online_form_row"
+    id = Column(Integer, primary_key=True, index=True)
+    form_id = Column(Integer, ForeignKey("online_form.id"))
+    member_name = Column(String)  # 填写人姓名
+    data = Column(Text, default="{}")  # 行数据 JSON: {"name":"张三","progress":"50%"}
+    filled = Column(Boolean, default=False)  # 是否已填写
+    filled_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TokenUsage(Base):
+    """用户AI Token用量记录表"""
+    __tablename__ = "token_usage"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    date = Column(Date)  # 日期，每天一条记录
+    request_count = Column(Integer, default=0)  # 请求次数
+    token_count = Column(Integer, default=0)  # token用量估算
+    updated_at = Column(DateTime, default=datetime.utcnow)

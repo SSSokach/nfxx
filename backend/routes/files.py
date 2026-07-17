@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from app import SessionLocal
+from dependencies import get_db
 from models import File, FileCollectionTask, FileCollectionItem, ChatTodoItem, Message, User
 from services.excel_analyzer import read_excel_template
 from datetime import datetime
@@ -14,13 +14,6 @@ router = APIRouter()
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.get("/{user_id}")
 def get_files(user_id: int, db: Session = Depends(get_db)):
