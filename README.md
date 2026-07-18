@@ -136,6 +136,31 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 后端将自动提供前端静态文件，直接访问 `http://localhost:8000` 即可。
 
+### 3. 打包，部署到服务器
+
+```bash
+cd /home/longbook/nfxx/backend
+mkdir packages
+pip3 download -r requirements.txt -d packages
+
+cd /home/longbook/nfxx
+zip -r backend-deploy.zip backend/ frontend/dist/ README.md
+```
+
+### 4. 服务器上安装依赖
+
+```bash
+cd backend
+pip3 install --no-index --find-links=packages -r requirements.txt
+```
+
+### 5. 启动后端服务
+
+```bash
+cd /home/longbook/nfxx/backend
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
 ## API接口
 
 ### 用户管理
