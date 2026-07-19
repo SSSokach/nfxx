@@ -45,6 +45,12 @@ export const aiApi = {
     api.post(`/ai/prioritize-todos/${userId}`, {}, { timeout: 60000 }),
   meetingMinutes: (userId, contactId) =>
     api.post(`/ai/meeting-minutes?user_id=${userId}&contact_id=${contactId}`, {}, { timeout: 120000 }),
+  polishText: (text, style) =>
+    api.post(`/ai/polish?text=${encodeURIComponent(text)}${style ? `&style=${encodeURIComponent(style)}` : ''}`, {}, { timeout: 60000 }),
+  draftEmail: (scene, recipient, topic, points, original, language) =>
+    api.post('/ai/draft-email', { scene, recipient, topic, points, original, language }, { timeout: 60000 }),
+  extractInfo: (text, types) =>
+    api.post('/ai/extract-info', { text, types }, { timeout: 60000 }),
   getUsage: (userId) => api.get(`/ai/usage/${userId}`)
 }
 

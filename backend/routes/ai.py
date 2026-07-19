@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from dependencies import get_db
 from models import User, Message, Contact, UserContact
 from typing import Optional
@@ -24,6 +25,9 @@ def get_tools():
         {"name": "summarize_file", "description": "生成文件结构化摘要"},
         {"name": "search_files", "description": "按关键词搜索文件内容"},
         {"name": "get_recent_messages", "description": "获取最近跨联系人消息"},
+        {"name": "polish_text", "description": "AI 文本润色与改写"},
+        {"name": "draft_email", "description": "AI 起草邮件"},
+        {"name": "extract_information", "description": "AI 从文本提取结构化信息"},
     ]}
 
 @router.post("/chat")
@@ -179,3 +183,68 @@ def meeting_minutes(
         }
     except Exception as e:
         return {"error": f"提取会议纪要失败: {e}"}
+
+
+# ===== 文本润色 / 邮件起草 / 信息抽取 =====
+
+
+class DraftEmailRequest(BaseModel):
+    scene: str = "new"
+    recipient: str = ""
+    topic: str = ""
+    points: list[str] = []
+    original: str = ""
+    language: str = "zh"
+
+
+class ExtractInfoRequest(BaseModel):
+    text: str
+    types: list[str] | None = None
+
+
+@router.post("/polish")
+def polish_text(
+    text: str = Query(...),
+    style: Optional[str] = Query(None),
+):
+    """AI 文本润色与改写：返回默认版本及多种风格变体。"""
+    try:
+        result = glm_ai.polish_text(text, style)
+        return {
+            "default_version": result.get("default_version", text),
+            "variants": result.get("variants", []),
+            "changes": result.get("changes", ""),
+        }
+    except Exception as e:
+        return {"error": f"润色失败: {e}"}
+
+
+@router.post("/draft-email")
+def draft_email(req: DraftEmailRequest):
+    """AI 邮件起草：根据场景与要点生成邮件初稿。"""
+    try:
+        result = glm_ai.draft_email(
+            scene=req.scene,
+            recipient=req.recipient,
+            topic=req.topic,
+            points=req.points,
+            original=req.original,
+            language=req.language,
+        )
+        return {
+            "subject": result.get("subject", ""),
+            "body": result.get("body", ""),
+            "placeholders": result.get("placeholders", []),
+        }
+    except Exception as e:
+        return {"error": f"邮件起草失败: {e}"}
+
+
+@router.post("/extract-info")
+def extract_information(req: ExtractInfoRequest):
+    """AI 信息抽取：从文本中提取结构化信息（人名/时间/金额/地点/动作/组织）。"""
+    try:
+        result = glm_ai.extract_information(req.text, req.types)
+        return result
+    except Exception as e:
+        return {"error": f"信息抽取失败: {e}"}
