@@ -178,10 +178,10 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 ```bash
 cd /home/longbook/nfxx/backend
-// 下载依赖（x86架构）
-pip3 download -r requirements.txt -d packages_x86
-// 下载依赖（ARM架构）
-pip3 download -r requirements.txt   --platform manylinux2014_aarch64   --python-version 314   --only-binary=:all:   -d ./packages_arm
+## 下载依赖（x86架构）
+pip3 download -r requirements.txt  -d packages_x86
+## 下载依赖（ARM架构）
+pip3 download -r requirements.txt  --platform manylinux2014_aarch64  --only-binary=:all:   -d ./packages_arm
 
 cd /home/longbook/nfxx
 zip -r backend-deploy.zip backend/ frontend/dist/ README.md start.sh restart.sh
@@ -191,7 +191,10 @@ zip -r backend-deploy.zip backend/ frontend/dist/ README.md start.sh restart.sh
 
 ```bash
 cd backend
-pip3 install --no-index --find-links=packages -r requirements.txt
+## 安装 x86 架构依赖
+pip3 install --no-index --find-links=packages_x86 -r requirements.txt
+## 安装 ARM 架构依赖
+pip3 install --no-index --find-links=packages_arm -r requirements.txt
 ```
 
 ### 5. 启动后端服务
