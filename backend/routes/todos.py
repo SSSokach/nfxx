@@ -459,12 +459,59 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
     }
     processed_ids = scanned_msg_ids | candidate_msg_ids | todo_msg_ids
 
-    # === 查询未处理的消息（别人发的，且不在 processed_ids 中）===
-    # 先查最近 100 条别人发的消息，再从中过滤未处理的
-    recent_msgs = db.query(Message).filter(
-        Message.contact_id.in_(contact_ids),
-        Message.sender_id != user_id,
-    ).order_by(Message.created_at.desc()).limit(100).all()
+    # === 查询未处理的消息 ===
+    # 优化策略：
+    # - 群聊：只取 @所有人 或 @当前用户 的消息（群聊噪声大，@才有相关性）
+    # - 私聊：全量取（私聊消息量少，都需要看）
+    # - 时间范围：今日消息 与 最近100条 取较大者（保证至少能扫到今天全部 + 历史最近100条）
+    from datetime import date as date_cls
+
+    today_start = datetime.combine(date_cls.today(), datetime.min.time())
+
+    # 区分群聊和私聊的 contact_id
+    group_contact_ids = [c.id for c in all_contacts if c.is_group]
+    private_contact_ids = [c.id for c in all_contacts if not c.is_group]
+
+    # --- 群聊消息：只取 @所有人 或 @当前用户名 的 ---
+    group_msgs_today = []
+    group_msgs_recent = []
+    if group_contact_ids:
+        group_today_q = db.query(Message).filter(
+            Message.contact_id.in_(group_contact_ids),
+            Message.sender_id != user_id,
+            Message.created_at >= today_start,
+            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+        ).all()
+        group_msgs_today = group_today_q
+
+        group_recent_q = db.query(Message).filter(
+            Message.contact_id.in_(group_contact_ids),
+            Message.sender_id != user_id,
+            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+        ).order_by(Message.created_at.desc()).limit(100).all()
+        group_msgs_recent = group_recent_q
+
+    # --- 私聊消息：全量取 ---
+    private_msgs_today = []
+    private_msgs_recent = []
+    if private_contact_ids:
+        private_msgs_today = db.query(Message).filter(
+            Message.contact_id.in_(private_contact_ids),
+            Message.sender_id != user_id,
+            Message.created_at >= today_start,
+        ).all()
+
+        private_msgs_recent = db.query(Message).filter(
+            Message.contact_id.in_(private_contact_ids),
+            Message.sender_id != user_id,
+        ).order_by(Message.created_at.desc()).limit(100).all()
+
+    # 合并：今日消息 与 最近100条 取并集（去重），实现"较大者"
+    # 用 dict 按 message.id 去重，保留 Message 对象
+    merged_by_id = {}
+    for m in group_msgs_today + group_msgs_recent + private_msgs_today + private_msgs_recent:
+        merged_by_id[m.id] = m
+    recent_msgs = list(merged_by_id.values())
 
     unprocessed = [m for m in recent_msgs if m.id not in processed_ids]
     if not unprocessed:
@@ -476,8 +523,9 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
         }
 
     # 构建批量消息（按时间正序）
+    unprocessed.sort(key=lambda m: m.created_at)
     messages_batch = []
-    for m in reversed(unprocessed):
+    for m in unprocessed:
         contact = next((c for c in all_contacts if c.id == m.contact_id), None)
         source_name = contact.name if contact else ""
         source_type = "group" if (contact and contact.is_group) else "private"
