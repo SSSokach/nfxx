@@ -234,6 +234,7 @@ def get_chat_todos(
             "group_name": t.group_name,
             "peer_name": t.peer_name,
             "content": t.content,
+            "form_id": t.form_id,
             "deadline": t.deadline.isoformat() if t.deadline else None,
             "status": t.status,
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,

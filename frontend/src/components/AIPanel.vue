@@ -142,9 +142,17 @@
               v-for="todo in mergedTodos"
               :key="todo.uid"
               class="todo-item"
-              :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed' }"
+              :class="{
+                overdue: !todo.completed && isOverdue(todo.deadline),
+                completed: todo.status === 'completed',
+                clickable: todo.form_id,
+              }"
+              @click="onTodoClick(todo)"
             >
-              <div class="todo-content">{{ todo.content || todo.title }}</div>
+              <div class="todo-content">
+                {{ todo.content || todo.title }}
+                <span v-if="todo.form_id" class="todo-jump-hint">点击填写 →</span>
+              </div>
               <div class="todo-meta">
                 <span class="meta-tag email" v-if="todo.source_type === 'email'">✉️ 邮件</span>
                 <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
@@ -154,8 +162,8 @@
                 <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
               </div>
               <div class="todo-actions" v-if="todo.status === 'pending'">
-                <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
-                <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
+                <button class="mini-btn success" @click.stop="completeTodo(todo)">完成</button>
+                <button class="mini-btn danger" @click.stop="deleteTodo(todo)">删除</button>
               </div>
             </div>
           </div>
@@ -165,62 +173,82 @@
       <!-- ===== Forms Tab ===== -->
       <div v-show="activeTab === 'forms'" class="tab-pane tab-pane-forms">
         <div class="forms-scroll">
-          <!-- Create online form -->
+          <!-- 工具栏 -->
           <div class="forms-toolbar">
-            <select v-model="formTrackerContactId" class="form-select">
-              <option value="">选择群聊</option>
-              <option v-for="c in contactsForForms" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-            <input v-model="formTrackerName" class="form-input" placeholder="表格名称" />
-            <input v-model="formTrackerMembers" class="form-input" placeholder="需填写人员(逗号分隔)" />
-          </div>
-          <div class="forms-columns-row" v-if="formTrackerName">
-            <input v-model="formColumnInput" class="form-input" placeholder="自定义列名(逗号分隔)，如: 周报,进度,备注" style="flex:1" />
-          </div>
-          <div class="forms-actions-row">
-            <button class="form-btn" @click="createOnlineForm" :disabled="!formTrackerContactId || !formTrackerName || !formTrackerMembers">📋 创建在线表格</button>
-            <button class="form-btn ghost" @click="createFormTracker" :disabled="!formTrackerContactId || !formTrackerName || !formTrackerMembers">仅追踪</button>
-            <button class="form-btn secondary" @click="checkAllForms" :disabled="formsChecking">
-              {{ formsChecking ? '检测中...' : '🔍 一键检测' }}
+            <button class="form-btn primary" @click="showFormCreator = true">📋 创建在线表格</button>
+            <button class="form-btn secondary" @click="checkAllTrackers" :disabled="trackersChecking">
+              {{ trackersChecking ? '检测中...' : '🔍 一键检测' }}
             </button>
           </div>
 
-          <div v-if="formTrackers.length === 0" class="pane-empty">暂无表格追踪</div>
-          <div v-for="t in formTrackers" :key="t.id" class="form-tracker-item">
+          <div v-if="unifiedTrackers.length === 0" class="pane-empty">
+            暂无表格追踪<br>
+            <span style="font-size:11px;opacity:0.7">点击上方按钮创建在线表格</span>
+          </div>
+
+          <!-- 统一追踪列表 -->
+          <div v-for="t in unifiedTrackers" :key="t.tracker_id" class="form-tracker-item">
             <div class="form-tracker-header">
-              <span class="form-tracker-name">{{ t.form_name }}</span>
-              <span class="form-progress-badge" :class="t.status">{{ t.progress }} {{ t.status === 'completed' ? '✓' : '' }}</span>
+              <span class="form-tracker-name">
+                <span :class="['type-badge', t.type]">{{ typeLabel(t.type) }}</span>
+                {{ t.title }}
+              </span>
+              <span :class="['form-progress-badge', t.status]">
+                {{ t.progress.filled }}/{{ t.progress.total }}
+                {{ t.status === 'completed' ? '✓' : '' }}
+              </span>
             </div>
+
+            <!-- 进度条 -->
+            <div class="progress-bar-wrap">
+              <div class="progress-bar"
+                   :class="{ done: t.progress.percent === 100 }"
+                   :style="{ width: t.progress.percent + '%' }"></div>
+            </div>
+            <div class="progress-text">{{ t.progress.percent }}% 完成</div>
+
             <div class="form-tracker-body">
-              <div class="form-members">
+              <div class="form-members" v-if="t.filled_members.length > 0">
                 <span class="form-member-label">已填：</span>
                 <span v-for="m in t.filled_members" :key="m" class="form-member-tag done">{{ m }}</span>
-                <span v-if="t.filled_members.length === 0" class="form-member-empty">无</span>
               </div>
               <div class="form-members" v-if="t.unfilled_members.length > 0">
                 <span class="form-member-label">未填：</span>
                 <span v-for="m in t.unfilled_members" :key="m" class="form-member-tag pending">{{ m }}</span>
               </div>
-              <div class="form-tracker-meta" v-if="t.last_checked">上次检测：{{ t.last_checked }}</div>
+              <div class="form-tracker-meta">
+                <span v-if="t.deadline">📅 截止：{{ t.deadline }}</span>
+                <span v-if="t.last_checked"> | 上次检测：{{ t.last_checked }}</span>
+              </div>
             </div>
-            <div class="form-tracker-actions" v-if="t.status === 'tracking'">
-              <button class="form-btn small" @click="checkForm(t.id)">检测</button>
-              <button class="form-btn small info" v-if="t.form_url && t.form_url.includes('online-forms')" @click="openOnlineForm(t.form_url)">查看表格</button>
-              <button class="form-btn small warn" @click="remindForm(t.id)" v-if="t.unfilled_members.length > 0">@催办</button>
-              <button class="form-btn small danger" @click="cancelForm(t.id)">取消</button>
+
+            <div class="form-tracker-actions">
+              <button class="form-btn small" @click="checkTracker(t)">检测</button>
+              <button class="form-btn small info" v-if="t.type === 'online_form'" @click="openOnlineFormFiller(t.source_id)">查看/填写表格</button>
+              <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0">@催办</button>
+              <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Online Form Modal -->
-    <OnlineFormModal
-      :visible="onlineFormVisible"
-      :formId="onlineFormId"
-      @close="onlineFormVisible = false"
-      @remind="handleRemindFromModal"
-      @updated="loadFormTrackers"
+    <!-- Form Creator Modal -->
+    <FormCreator
+      :visible="showFormCreator"
+      :groupChats="groupChatsForCreator"
+      :groupMembers="groupMembersForCreator"
+      :currentUserId="props.currentUserId"
+      @close="showFormCreator = false"
+      @created="handleFormCreated"
+    />
+
+    <!-- Form Filler Modal -->
+    <FormFiller
+      :visible="formFillerVisible"
+      :formId="formFillerId"
+      @close="formFillerVisible = false"
+      @refresh="loadUnifiedTrackers"
     />
   </div>
 </template>
@@ -228,7 +256,8 @@
 <script setup>
 import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import { aiApi, todosApi, emailsApi, formsApi, chatsApi, onlineFormsApi } from '../api'
-import OnlineFormModal from './OnlineFormModal.vue'
+import FormCreator from './FormCreator.vue'
+import FormFiller from './FormFiller.vue'
 import { marked } from 'marked'
 
 marked.setOptions({ breaks: true })
@@ -259,8 +288,8 @@ const switchTab = (key) => {
     loadCandidates()
   }
   if (key === 'forms') {
-    loadFormTrackers()
-    loadContactsForForms()
+    loadUnifiedTrackers()
+    loadGroupChatsAndMembers()
   }
   if (key === 'chat') {
     loadUsage()
@@ -440,7 +469,8 @@ const mergedTodos = computed(() => {
     deadline: t.deadline,
     status: t.status,
     source_type: t.source_type || 'group',
-    source_name: t.group_name || t.peer_name || ''
+    source_name: t.group_name || t.peer_name || '',
+    form_id: t.form_id,
   }))
   const emailItems = emailTodos.value.map(t => ({
     uid: `email-${t.id}`,
@@ -557,125 +587,135 @@ onMounted(() => {
   loadUsage()
 })
 
-// ===== Form Tracker =====
-const formTrackers = ref([])
-const formTrackerContactId = ref('')
-const formTrackerName = ref('')
-const formTrackerMembers = ref('')
-const formColumnInput = ref('')
-const formsChecking = ref(false)
-const contactsForForms = ref([])
-const onlineFormVisible = ref(false)
-const onlineFormId = ref(null)
+// ===== Form Tracker (统一追踪视图) =====
+const unifiedTrackers = ref([])
+const trackersChecking = ref(false)
+const showFormCreator = ref(false)
+const formFillerVisible = ref(false)
+const formFillerId = ref(null)
+const groupChatsForCreator = ref([])
+const groupMembersForCreator = ref([])
 
-const loadFormTrackers = async () => {
+const typeLabel = (type) => ({
+  online_form: '在线表格',
+  file_collection: '文件收集',
+  tracker_only: '追踪',
+}[type] || '追踪')
+
+const loadUnifiedTrackers = async () => {
   if (!props.currentUserId) return
   try {
-    const res = await formsApi.getList(props.currentUserId)
-    formTrackers.value = res.data || []
-  } catch (e) {}
+    const res = await onlineFormsApi.trackers(props.currentUserId)
+    unifiedTrackers.value = res.data || []
+  } catch (e) {
+    console.error('加载追踪列表失败', e)
+  }
 }
 
-const loadContactsForForms = async () => {
+const loadGroupChatsAndMembers = async () => {
   if (!props.currentUserId) return
   try {
     const res = await chatsApi.getContacts(props.currentUserId)
-    // 只显示群聊
-    contactsForForms.value = (res.data || []).filter(c => c.is_group)
+    const groups = (res.data || []).filter(c => c.is_group)
+    groupChatsForCreator.value = groups
+    // 群成员从所有联系人姓名里取（简化处理）
+    const allMembers = (res.data || [])
+      .filter(c => !c.is_group)
+      .map(c => c.name)
+      .filter(Boolean)
+    groupMembersForCreator.value = [...new Set(allMembers)]
   } catch (e) {}
 }
 
-const createFormTracker = async () => {
-  if (!formTrackerContactId.value || !formTrackerName.value || !formTrackerMembers.value) return
+const handleFormCreated = async (data) => {
   try {
-    await formsApi.create(props.currentUserId, formTrackerContactId.value, formTrackerName.value, formTrackerMembers.value)
-    formTrackerName.value = ''
-    formTrackerMembers.value = ''
-    formColumnInput.value = ''
-    await loadFormTrackers()
-  } catch (e) {
-    todoError.value = '创建追踪失败'
-  }
-}
-
-const createOnlineForm = async () => {
-  if (!formTrackerContactId.value || !formTrackerName.value || !formTrackerMembers.value) return
-  try {
-    // 构建列定义：只使用用户自定义列，填写人由系统自动记录
-    const customCols = formColumnInput.value
-      ? formColumnInput.value.split(',').map(s => s.trim()).filter(Boolean)
-      : ['填写内容']
-    const columns = customCols.map((label, i) => ({ key: `col_${i}`, label }))
-    const members = formTrackerMembers.value.split(',').map(s => s.trim()).filter(Boolean)
-    const res = await onlineFormsApi.create({
-      creator_id: props.currentUserId,
-      contact_id: parseInt(formTrackerContactId.value),
-      title: formTrackerName.value,
-      columns: columns,
-      required_members: members,
-    })
-    formTrackerName.value = ''
-    formTrackerMembers.value = ''
-    formColumnInput.value = ''
-    await loadFormTrackers()
-    // 打开刚创建的表格
-    if (res.data.id) {
-      onlineFormId.value = res.data.id
-      onlineFormVisible.value = true
+    let res
+    if (data.type === 'excel') {
+      res = await onlineFormsApi.createFromExcel(data.payload)
+    } else {
+      res = await onlineFormsApi.create(data.payload)
     }
+    showFormCreator.value = false
+    await loadUnifiedTrackers()
+    activeTab.value = 'forms'
+    alert(res.data.message || '创建成功')
   } catch (e) {
-    todoError.value = '创建在线表格失败'
+    alert('创建失败: ' + (e.response?.data?.detail || e.message))
   }
 }
 
-const openOnlineForm = (formUrl) => {
-  const formId = parseInt(formUrl.split('/').pop())
-  if (formId) {
-    onlineFormId.value = formId
-    onlineFormVisible.value = true
+const openOnlineFormFiller = (formId) => {
+  formFillerId.value = formId
+  formFillerVisible.value = true
+}
+
+const onTodoClick = (todo) => {
+  if (todo.form_id) {
+    openOnlineFormFiller(todo.form_id)
   }
 }
 
-const handleRemindFromModal = (formId) => {
-  // 从弹窗触发催办 — 找到对应的 tracker 并调用 remind
-  const tracker = formTrackers.value.find(t => t.form_url && t.form_url.includes(`online-forms/${formId}`))
-  if (tracker) {
-    remindForm(tracker.id)
-  }
-}
-
-const checkForm = async (id) => {
+const checkTracker = async (t) => {
   try {
-    const res = await formsApi.check(id)
-    await loadFormTrackers()
+    if (t.type === 'online_form') {
+      await onlineFormsApi.check(t.source_id)
+    } else if (t.type === 'file_collection') {
+      const { fileCollectionApi } = await import('../api')
+      await fileCollectionApi.scanProgress(t.source_id)
+    } else {
+      const { formsApi } = await import('../api')
+      await formsApi.check(t.tracker_id)
+    }
+    await loadUnifiedTrackers()
   } catch (e) {}
 }
 
-const remindForm = async (id) => {
+const remindTracker = async (t) => {
   try {
-    const res = await formsApi.remind(id)
-    alert(res.data.message)
-    await loadFormTrackers()
+    if (t.type === 'online_form') {
+      const res = await onlineFormsApi.remind(t.source_id)
+      alert(res.data.message + '\n\n发送内容：\n' + (res.data.sent_content || ''))
+    } else {
+      const { formsApi } = await import('../api')
+      const res = await formsApi.remind(t.tracker_id)
+      alert(res.data.message)
+    }
+    await loadUnifiedTrackers()
   } catch (e) {
-    todoError.value = '催办失败'
+    alert('催办失败: ' + (e.response?.data?.detail || e.message))
   }
 }
 
-const cancelForm = async (id) => {
+const deleteTracker = async (t) => {
+  if (!confirm(`确定要删除表格《${t.title}》吗？\n\n将一并删除：\n• 表格数据\n• 追踪记录\n• 关联的待办\n\n此操作不可恢复。`)) {
+    return
+  }
   try {
-    await formsApi.cancel(id)
-    await loadFormTrackers()
-  } catch (e) {}
+    if (t.type === 'online_form') {
+      await onlineFormsApi.delete(t.source_id)
+    } else {
+      // 文件收集类暂用 cancel（标记取消）
+      const { formsApi } = await import('../api')
+      await formsApi.cancel(t.tracker_id)
+    }
+    await loadUnifiedTrackers()
+  } catch (e) {
+    alert('删除失败: ' + (e.response?.data?.detail || e.message))
+  }
 }
 
-const checkAllForms = async () => {
-  if (!props.currentUserId || formsChecking.value) return
-  formsChecking.value = true
+const checkAllTrackers = async () => {
+  if (!props.currentUserId || trackersChecking.value) return
+  trackersChecking.value = true
   try {
-    await formsApi.checkAll(props.currentUserId)
-    await loadFormTrackers()
+    // 逐个检测 online_form 类型的追踪
+    const ofTrackers = unifiedTrackers.value.filter(t => t.type === 'online_form')
+    for (const t of ofTrackers) {
+      try { await onlineFormsApi.check(t.source_id) } catch (e) {}
+    }
+    await loadUnifiedTrackers()
   } catch (e) {}
-  formsChecking.value = false
+  trackersChecking.value = false
 }
 </script>
 
@@ -1087,6 +1127,28 @@ const checkAllForms = async () => {
   color: #999;
 }
 
+.todo-item.clickable {
+  cursor: pointer;
+  border-color: #b4c7ff;
+  background-color: #f0f6ff;
+}
+.todo-item.clickable:hover {
+  border-color: #4b8cff;
+  background-color: #e8f1ff;
+  box-shadow: 0 2px 8px rgba(75, 140, 255, 0.15);
+}
+.todo-jump-hint {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b8cff;
+  opacity: 0.8;
+}
+.todo-item.clickable:hover .todo-jump-hint {
+  opacity: 1;
+}
+
 .todo-content {
   font-size: 13px;
   color: #1f2937;
@@ -1389,6 +1451,44 @@ const checkAllForms = async () => {
 }
 .form-progress-badge.completed { background: #d1fae5; color: #059669; }
 .form-progress-badge.cancelled { background: #f3f4f6; color: #9ca3af; }
+
+/* 进度条 */
+.progress-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: #e2e6f2;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4b8cff, #667eea);
+  transition: width 0.4s ease;
+  border-radius: 99px;
+}
+.progress-bar.done {
+  background: linear-gradient(90deg, #34d399, #2ab06f);
+}
+.progress-text {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+/* 类型徽章 */
+.type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.type-badge.online_form { background: #dbeafe; color: #2563eb; }
+.type-badge.file_collection { background: #fef3c7; color: #d97706; }
+.type-badge.tracker_only { background: #f3f4f6; color: #6b7280; }
+
 .form-tracker-body { font-size: 13px; }
 .form-members { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .form-member-label { color: #6b7280; font-size: 12px; }

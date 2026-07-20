@@ -13,8 +13,9 @@ export const usersApi = {
 export const chatsApi = {
   getContacts: (userId) => api.get(`/chats/contacts/${userId}`),
   getMessages: (userId, contactId) => api.get(`/chats/messages?user_id=${userId}&contact_id=${contactId}`),
-  sendMessage: (userId, contactId, content, type = 'text', fileId = null, replyToId = null) => 
-    api.post(`/chats/send?user_id=${userId}&contact_id=${contactId}&content=${encodeURIComponent(content)}&message_type=${type}&file_id=${fileId || ''}&reply_to_id=${replyToId || ''}`)
+  sendMessage: (userId, contactId, content, type = 'text', fileId = null, replyToId = null) =>
+    api.post(`/chats/send?user_id=${userId}&contact_id=${contactId}&content=${encodeURIComponent(content)}&message_type=${type}&file_id=${fileId || ''}&reply_to_id=${replyToId || ''}`),
+  getGroupMembers: (contactId) => api.get(`/chats/contacts/${contactId}/members`),
 }
 
 export const filesApi = {
@@ -127,9 +128,15 @@ export const formsApi = {
 
 export const onlineFormsApi = {
   create: (data) => api.post('/online-forms/create', data),
+  createFromExcel: (data) => api.post('/online-forms/create-from-excel', data),
   get: (formId) => api.get(`/online-forms/${formId}`),
-  fill: (formId, memberName, data) => api.post(`/online-forms/${formId}/fill`, { member_name: memberName, data }),
+  fill: (formId, memberName, data, memberUserId = null) => api.post(`/online-forms/${formId}/fill`, { member_name: memberName, member_user_id: memberUserId, data }),
   check: (formId) => api.post(`/online-forms/${formId}/check`),
   list: (userId) => api.get(`/online-forms/list/${userId}`),
   close: (formId) => api.post(`/online-forms/${formId}/close`),
+  delete: (formId) => api.delete(`/online-forms/${formId}`),
+  remind: (formId) => api.post(`/online-forms/${formId}/remind`),
+  updateColumns: (formId, columns) => api.put(`/online-forms/${formId}/columns`, { columns }),
+  addMembers: (formId, members) => api.post(`/online-forms/${formId}/add-members`, { members }),
+  trackers: (userId) => api.get(`/online-forms/trackers/${userId}`),
 }

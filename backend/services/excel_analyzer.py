@@ -8,8 +8,13 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 
 def _get_excel_path(file_id: int, file_name: str):
-    """获取 Excel 文件的物理路径。"""
+    """获取 Excel 文件的物理路径。兼容两种命名：{id}_{name} 和 {name}。"""
+    # 优先查找带 id 前缀的（上传时的命名）
     phys_path = os.path.join(UPLOAD_DIR, f"{file_id}_{file_name}")
+    if os.path.exists(phys_path):
+        return phys_path
+    # 回退到不带前缀的（演示数据 / 手动放入的文件）
+    phys_path = os.path.join(UPLOAD_DIR, file_name)
     if os.path.exists(phys_path):
         return phys_path
     return None

@@ -83,6 +83,7 @@ class ChatTodoItem(Base):
     group_name = Column(String, nullable=True)
     peer_name = Column(String, nullable=True)
     content = Column(Text)
+    form_id = Column(Integer, nullable=True)  # 关联在线表格 ID（无外键约束，便于跨表查询）
     deadline = Column(Date, nullable=True)
     status = Column(String, default="pending")  # pending / completed / deleted
     completed_at = Column(DateTime, nullable=True)
@@ -201,15 +202,18 @@ class Email(Base):
 
 
 class FormTracker(Base):
-    """在线表格追踪表"""
+    """在线表格追踪表（统一追踪入口，关联 OnlineForm 或 FileCollectionTask）"""
     __tablename__ = "form_tracker"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))  # 表格创建人/追踪人
-    contact_id = Column(Integer, ForeignKey("contacts.id"))  # 所在群聊
+    user_id = Column(Integer, ForeignKey("users.id"))  # 追踪人（通常等于发起人）
+    contact_id = Column(Integer, ForeignKey("contacts.id"))  # 所在群聊/会话
     form_name = Column(String)  # 表格名称
     form_url = Column(Text, nullable=True)  # 表格链接（可选）
+    online_form_id = Column(Integer, ForeignKey("online_form.id"), nullable=True)  # 关联在线表格
+    file_collection_task_id = Column(Integer, ForeignKey("file_collection_tasks.id"), nullable=True)  # 关联文件收集任务
     required_members = Column(Text)  # 需要填写的人员名单，逗号分隔
     filled_members = Column(Text, default="")  # 已填写人员，逗号分隔
+    deadline = Column(Date, nullable=True)  # 截止日期
     status = Column(String, default="tracking")  # tracking / completed / cancelled
     last_checked = Column(DateTime, nullable=True)  # 上次检测时间
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -217,16 +221,29 @@ class FormTracker(Base):
 
 
 class OnlineForm(Base):
-    """在线表格表 - 存储表格定义和列结构"""
+    """在线表格表 - 存储表格定义和列结构
+
+    columns JSON 格式（增强版，支持列类型）:
+    [
+        {"key":"name","label":"姓名","type":"name","required":true,"editable":false},
+        {"key":"col_0","label":"周报","type":"text","required":true,"editable":true},
+        {"key":"col_1","label":"进度","type":"number","required":false,"editable":true},
+        {"key":"col_2","label":"截止日期","type":"date","required":false,"editable":true},
+        {"key":"col_3","label":"状态","type":"select","options":["进行中","已完成","延期"],"required":false,"editable":true}
+    ]
+    type 取值: name(姓名列,唯一,不可编辑) / text / number / date / select
+    """
     __tablename__ = "online_form"
     id = Column(Integer, primary_key=True, index=True)
     creator_id = Column(Integer, ForeignKey("users.id"))  # 创建人
     contact_id = Column(Integer, ForeignKey("contacts.id"))  # 关联群聊
     title = Column(String)  # 表格标题
-    columns = Column(Text)  # 列定义 JSON: [{"key":"name","label":"姓名","type":"text"},{"key":"progress","label":"进度","type":"text"}]
+    columns = Column(Text)  # 列定义 JSON（见上方格式）
     required_members = Column(Text)  # 需要填写的人员名单，逗号分隔
+    deadline = Column(Date, nullable=True)  # 截止日期
     status = Column(String, default="active")  # active / closed
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class OnlineFormRow(Base):
@@ -235,10 +252,12 @@ class OnlineFormRow(Base):
     id = Column(Integer, primary_key=True, index=True)
     form_id = Column(Integer, ForeignKey("online_form.id"))
     member_name = Column(String)  # 填写人姓名
-    data = Column(Text, default="{}")  # 行数据 JSON: {"name":"张三","progress":"50%"}
+    member_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 填写人用户ID（可空）
+    data = Column(Text, default="{}")  # 行数据 JSON: {"name":"张三","col_0":"50%"}
     filled = Column(Boolean, default=False)  # 是否已填写
     filled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class TokenUsage(Base):
@@ -250,3 +269,31 @@ class TokenUsage(Base):
     request_count = Column(Integer, default=0)  # 请求次数
     token_count = Column(Integer, default=0)  # token用量估算
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FileCollectionTask(Base):
+    """文件收集任务表（群聊中发起的 Excel 文件收集）"""
+    __tablename__ = "file_collection_tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    initiator_user_id = Column(Integer, ForeignKey("users.id"))  # 发起人
+    source_message_id = Column(Integer, ForeignKey("messages.id"))  # 触发消息
+    group_name = Column(String(100))  # 群聊名称
+    file_name = Column(String(200))  # 要收集的文件名
+    description = Column(Text)  # 任务描述
+    deadline = Column(Date, nullable=True)  # 截止日期
+    status = Column(String(20), default="collecting")  # collecting / completed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FileCollectionItem(Base):
+    """文件收集明细表（每个待填写人一条记录）"""
+    __tablename__ = "file_collection_items"
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("file_collection_tasks.id"))  # 所属任务
+    assignee_user_id = Column(Integer, ForeignKey("users.id"))  # 待填写人
+    assignee_name = Column(String(50))  # 待填写人姓名
+    status = Column(String(20), default="pending")  # pending / submitted
+    submitted_file_id = Column(Integer, ForeignKey("files.id"), nullable=True)  # 提交的文件
+    submitted_at = Column(DateTime, nullable=True)  # 提交时间
+    created_at = Column(DateTime, default=datetime.utcnow)

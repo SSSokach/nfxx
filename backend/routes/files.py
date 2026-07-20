@@ -153,6 +153,9 @@ def get_excel_content(file_id: int, db: Session = Depends(get_db)):
 
     phys_path = os.path.join(UPLOAD_DIR, f"{file.id}_{file.name}")
     if not os.path.exists(phys_path):
+        # 回退到不带 id 前缀的路径（演示数据 / 手动放入的文件）
+        phys_path = os.path.join(UPLOAD_DIR, file.name)
+    if not os.path.exists(phys_path):
         return {"error": "Physical file not found"}
 
     try:

@@ -36,6 +36,29 @@ def get_contacts(user_id: int, db: Session = Depends(get_db)):
         })
     return result
 
+@router.get("/contacts/{contact_id}/members")
+def get_group_members(contact_id: int, db: Session = Depends(get_db)):
+    """获取某个群聊/会话的所有成员列表。
+
+    通过 UserContact 关联表反查所有属于该 contact 的用户。
+    """
+    contact = db.query(Contact).filter(Contact.id == contact_id).first()
+    if not contact:
+        return {"detail": "会话不存在"}, 404
+    user_contacts = db.query(UserContact).filter(
+        UserContact.contact_id == contact_id
+    ).all()
+    user_ids = [uc.user_id for uc in user_contacts]
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "avatar": u.avatar,
+        }
+        for u in users
+    ]
+
 @router.get("/messages")
 def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
     messages = db.query(Message).filter(Message.contact_id == contact_id).order_by(Message.created_at.asc()).all()

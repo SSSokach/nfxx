@@ -5,6 +5,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+from dotenv import load_dotenv
+
+# 加载 backend/.env 中的环境变量（OPENAI_API_KEY 等）
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./chat_demo.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})

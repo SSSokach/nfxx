@@ -275,8 +275,9 @@ print(f"[OK] 邮件追踪: 1条")
 online_form = OnlineForm(
     creator_id=U["张三"], contact_id=C["全员周报群"],
     title="7月工作汇报",
-    columns='[{"key":"weekly_work","label":"本周工作内容"},{"key":"progress","label":"完成进度"},{"key":"plan","label":"下周计划"}]',
+    columns='[{"key":"name","label":"姓名","type":"name","required":true,"editable":false},{"key":"weekly_work","label":"本周工作内容","type":"text","required":true,"editable":true},{"key":"progress","label":"完成进度","type":"text","required":false,"editable":true},{"key":"plan","label":"下周计划","type":"text","required":false,"editable":true}]',
     required_members="张三,李四,王五,赵六,郑十",
+    deadline=date.today() + timedelta(days=5),
     status="active", created_at=now - timedelta(hours=48),
 )
 db.add(online_form)
@@ -305,13 +306,27 @@ db.add(FormTracker(
     user_id=U["张三"], contact_id=C["全员周报群"],
     form_name="7月工作汇报",
     form_url=f"online-forms/{online_form.id}",  # 关联OnlineForm
+    online_form_id=online_form.id,  # 新字段：关联在线表格
     required_members="张三,李四,王五,赵六,郑十",
     filled_members=",".join(form_filled),
+    deadline=date.today() + timedelta(days=5),
     status="tracking", last_checked=now - timedelta(hours=2),
     created_at=now - timedelta(hours=48), updated_at=now - timedelta(hours=2),
 ))
 db.commit()
 print(f"[OK] 表格追踪: 1条 (关联OnlineForm)")
+
+# 为未填写人创建"填写表格"待办（带 form_id，前端可点击跳转）
+for name in form_unfilled:
+    db.add(ChatTodoItem(
+        user_id=U[name], source_type="group", group_name="7月工作汇报",
+        content=f"[填写表格] 7月工作汇报 - 由 张三 发起",
+        form_id=online_form.id,  # 关键：前端据此跳转到表格填写
+        deadline=date.today() + timedelta(days=5),
+        status="pending", created_at=now - timedelta(hours=48),
+    ))
+db.commit()
+print(f"[OK] 填写表格待办: {len(form_unfilled)}条 (带form_id, 可点击跳转)")
 
 # ============================================================
 # 13. 文件追踪（与Excel未填一致）
