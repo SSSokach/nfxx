@@ -140,8 +140,10 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 ```bash
 cd /home/longbook/nfxx/backend
-mkdir packages
-pip3 download -r requirements.txt -d packages
+// 下载依赖（x86架构）
+pip3 download -r requirements.txt -d packages_x86
+// 下载依赖（ARM架构）
+pip3 download -r requirements.txt   --platform manylinux2014_aarch64   --python-version 314   --only-binary=:all:   -d ./packages_arm
 
 cd /home/longbook/nfxx
 zip -r backend-deploy.zip backend/ frontend/dist/ README.md
