@@ -2,7 +2,7 @@
 
 > 基于 DeepSeek / Qwen 大模型的企业内部办公辅助系统
 >
-> 版本: v3.0 | 日期: 2026-07-14
+> 版本: v3.1 | 日期: 2026-07-20
 
 ---
 
@@ -123,6 +123,76 @@
 
 定时任务（默认每 1 小时）通过 WPS API 获取文档最新内容，判断每行人员是否已填写。此功能后续可通过 AI 对话触发查询。
 
+### 2.8 邮箱页面（已实现）
+
+在「AI办公助手」左上角新增视图切换按钮，支持在「消息」视图与「邮箱」视图之间切换。切换后左栏与中栏分别替换为邮件列表与邮件详情/写邮件，右侧 AI 助手面板保持不变。
+
+#### 2.8.1 前端展示
+
+- **视图切换**：ContactList 顶部 `view-toggle-row` 提供「💬 消息 / ✉️ 邮箱」两个按钮，通过 App.vue 的 `viewMode` 状态控制条件渲染。
+- **左栏 EmailList**：包含「收件箱 / 已发送 / 写邮件」三个 Tab，支持 Markdown 与附件标识（badge），右键弹出菜单（🤖 AI对话 / 📋 加入待办）。
+- **中栏 EmailDetail**：
+  - **详情模式**：展示主题、发件人/部门、收件人、时间、正文（支持 Markdown 渲染与纯文本）、附件列表（可点击预览），提供回复/转发按钮。
+  - **写邮件模式**：表单包含收件人、主题、正文类型切换（markdown/text）、正文输入框（Markdown 模式下提供实时预览）、附件选择器（从已有文件列表多选）。
+- **右栏 AIPanel**：保持不变；当以邮件上下文打开 AI 对话时，引用横幅显示为琥珀色（区别于消息的蓝紫色）。
+
+#### 2.8.2 行为逻辑
+
+1. **收发功能**：`POST /api/emails/send/{user_id}` 创建邮件并将 `folder` 设置为 `sent`；收件箱通过 `GET /api/emails/list/{user_id}?folder=inbox` 获取。
+2. **右键菜单 - AI对话**：右键邮件 → 调用 `GET /api/emails/detail/{email_id}` 获取正文与附件 → 拼接为引用上下文 → 在右侧 AI 对话面板中打开，提示用户输入问题。上下文横幅使用邮件来源标签（✉️ 邮件）。
+3. **右键菜单 - 加入待办**：右键邮件 → 调用 `POST /api/emails/add-to-todo/{user_id}/{email_id}` → 直接创建 `EmailTodoItem`（跳过候选阶段，进入正式待办列表）。
+4. **AI 扫描邮件**：`POST /api/todos/scan-candidates/{user_id` 同时扫描消息与邮件，未处理的新邮件通过 `glm_ai.detect_email_candidate_todos` 提取候选待办，写入 `CandidateTodo` 表（`source_type='email'`），并登记 `ScannedEmail` 用于去重。
+5. **候选确认分支**：`POST /api/todos/candidates/{candidate_id}/confirm` 根据 `source_type` 分支：
+   - `email` → 创建 `EmailTodoItem`
+   - 其他 → 创建 `ChatTodoItem`
+6. **待办 tag 区分**：AIPanel 待办列表中，邮件来源显示 ✉️ 邮件 tag（琥珀色），消息来源显示 💬 私聊 / 👥 群聊 tag（蓝紫色）。
+
+#### 2.8.3 数据模型扩展
+
+**Email 表新增列：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| folder | String | `inbox` / `sent` / `draft`，默认 `inbox` |
+| body_type | String | `markdown` / `text`，默认 `markdown` |
+| attachment_file_ids | String | 附件 File ID 列表，逗号分隔 |
+
+**CandidateTodo 表新增列：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| source_email_id | Integer | 来源邮件 ID（消息候选为空） |
+| source_type | String | `message` / `email`，默认 `message` |
+
+**新增表 ScannedEmail（邮件扫描去重）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 主键 |
+| user_id | Integer | 用户 ID |
+| email_id | Integer | 邮件 ID |
+| scanned_at | Datetime | 扫描时间 |
+
+#### 2.8.4 关键 API
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/emails/list/{user_id}?folder=inbox\|sent\|draft` | 获取邮件列表（按文件夹过滤） |
+| `GET /api/emails/detail/{email_id}` | 获取邮件详情（含附件内容） |
+| `POST /api/emails/send/{user_id}` | 发送新邮件（body: `{to, subject, content, body_type, attachment_file_ids}`） |
+| `POST /api/emails/add-to-todo/{user_id}/{email_id}` | 将邮件直接加入待办（不经候选阶段） |
+| `POST /api/todos/scan-candidates/{user_id}` | 同时扫描消息+邮件，生成候选待办 |
+| `POST /api/todos/candidates/{candidate_id}/confirm` | 确认候选（邮件→EmailTodoItem，消息→ChatTodoItem） |
+
+#### 2.8.5 AI skill：邮件摘要
+
+新增 `SKILL_EMAIL_SUMMARY`（Priority 4）：
+
+- **触发关键词**：`邮件摘要`、`总结邮件`、`总结这封邮件`、`邮件总结`
+- **触发正则**：`/邮件摘要|总结.{0,4}邮件/`
+- **system_prompt**：引导大模型对引用邮件的正文与附件内容生成结构化摘要（核心事项、关键时间、需跟进的待办、风险提示），并以 Markdown 输出。
+- **调用方式**：邮件列表右键 → AI对话 → 在右侧 AI 面板输入「总结这封邮件」即可触发。
+
 ## 3. 优先级与迭代计划
 
 | 优先级 | 功能模块 | 说明 |
@@ -130,6 +200,7 @@
 | P0 | AI 对话统一入口 | 快捷提示气泡 + 文件摘要/工作报告通过对话完成 |
 | P0 | 待办合并 | 消息+邮件待办统一列表 + 气泡式创建 + 完成/删除/超期标红 |
 | P0 | 智能回复气泡 | 聊天区域输入栏上方弹出智能回复气泡（目前占位文本） |
+| P0 | 邮箱页面 | 视图切换 + 收件箱/已发送/写邮件 + 右键 AI对话/加入待办 + 待办 tag 区分 |
 | P1 | 邮件回复追踪 | 自动检测已回复/未回复部门并汇总（后续通过 AI 对话查询） |
 | P1 | 文件回填检测 | 定时检测云文档填写状态，依赖 WPS API 和定时任务 |
 
@@ -556,4 +627,122 @@ flowchart TD
 
 ---
 
-*内部IM智能助手 - 功能实现细节 v3.0 | 2026-07-14*
+## 11. v3.1 更新：Skills 意图路由 + AI 能力扩展（2026-07-20）
+
+### 11.1 Skills 意图路由模块（新增 `backend/skills.py`）
+
+引入基于**关键词 + 正则 + 优先级**的意图路由机制，让 AI 对话能根据用户消息自动匹配到对应的功能场景，并拼接专属 system prompt。
+
+**9 个 Skill 定义**：
+
+| Skill 名称 | 功能 | 说明 |
+|-----------|------|------|
+| `file_summary` | 文件理解与摘要 | 调用 get_file_content/summarize_file，生成结构化摘要 |
+| `report_generation` | 报告生成 | **合并原 work_report + daily_digest**，按时间范围路由（日报→generate_daily_digest，周报/月报→generate_work_report） |
+| `smart_reply` | 智能回复建议 | 调用 smart_reply 工具生成多风格回复 |
+| `todo_management` | 待办管理 | 调用 prioritize_todos，支持超期标注、候选待办引导 |
+| `meeting_minutes` | 会议纪要提取 | 从群聊消息提取会议主题/参会人/决议/行动项 |
+| `communication_query` | 沟通信息查询 | 查询聊天记录/最近消息/联系人列表 |
+| `text_polish` ✨ | 文本润色与改写 | **新增**，支持专业/简洁/礼貌/正式风格 |
+| `email_drafting` ✨ | 邮件撰写与回复 | **新增**，支持新邮件/回复/转发场景 |
+| `info_extraction` ✨ | 信息抽取 | **新增**，从文本提取人名/时间/金额/地点/动作/组织 |
+
+**核心函数**：
+
+- `match_skill(user_message)` — 关键词匹配（+2分）+ 正则匹配（+3分），返回按 `(score, priority)` 降序排列的匹配列表
+- `get_matched_skill(user_message)` — 返回最匹配的 Skill 定义
+- `get_matched_skill_prompt(user_message)` — 返回最匹配 Skill 的专属 system prompt
+
+**匹配冲突消解**：每个 Skill 定义 `priority` 字段（数字越大越优先），当多个 Skill 得分相同时，高优先级胜出。例如"帮我回复"同时匹配 `smart_reply`(priority=4) 和 `communication_query`(priority=1)，最终走 `smart_reply`。
+
+**删除的 Skill**：
+- `message_classification`（消息意图分类）— 前端按钮触发更合适（`/ai/classify-message` 端点保留），对话式价值低。
+
+### 11.2 chat_with_ai 集成 Skills 路由
+
+`glm_ai.chat_with_ai()` 在组装 system prompt 时，先调用 `skills.get_matched_skill(message)` 匹配意图，将匹配到的 Skill 专属 prompt 拼接到通用 system prompt 之后：
+
+```python
+matched_skill = skill_registry.get_matched_skill(message)
+skill_prompt = matched_skill.get("system_prompt", "") if matched_skill else ""
+system_content = SYSTEM_PROMPT_TEMPLATE.format(user_name=user_name)
+if skill_prompt:
+    system_content += "\n\n" + skill_prompt
+```
+
+返回值新增 `skill` 字段（匹配到的 Skill 名称或 None），前端可据此做 UI 反馈（如展示当前激活的技能）。
+
+### 11.3 新增 3 个 AI 函数（`backend/glm_ai.py`）
+
+均通过 `_ai_call(prompt, expect_json=True)` 调用，要求返回结构化 JSON：
+
+#### polish_text(text, style=None)
+- 输入：原文 + 期望风格（专业/简洁/礼貌/正式，可选）
+- 输出：`{default_version, variants:[{style, content}], changes}`
+- 原则：保留原意、修正病句、不过度改写
+
+#### draft_email(scene, recipient, topic, points, original, language)
+- 输入：场景（new/reply/forward）+ 收件人 + 主题 + 要点 + 原邮件 + 语言
+- 输出：`{subject, body, placeholders}`
+- 原则：正文≤200字、不编造事实、待补充项用 `[待补充：xxx]` 标记
+
+#### extract_information(text, types=None)
+- 输入：文本 + 要抽取的类型列表（人名/时间/金额/地点/动作/组织，可选）
+- 输出：`{人名:[...], 时间:[...], 金额:[...], 地点:[...], 动作:[...], 组织:[...]}`
+- 原则：只抽取原文明确出现的信息、不推断、不补全
+
+### 11.4 新增 3 个 API 端点（`backend/routes/ai.py`）
+
+| 端点 | 方法 | 参数方式 | 说明 |
+|------|------|---------|------|
+| `/api/ai/polish` | POST | Query: text, style | 文本润色 |
+| `/api/ai/draft-email` | POST | Body: DraftEmailRequest | 邮件起草（参数多，用 body） |
+| `/api/ai/extract-info` | POST | Body: ExtractInfoRequest | 信息抽取 |
+
+同时更新 `GET /api/ai/tools` 端点，追加 3 个新工具声明。
+
+### 11.5 新增 3 个 Function Calling 工具
+
+在 `build_registry()` 中注册，让 AI 对话中能自主调用：
+
+- `polish_text` — 文本润色工具
+- `draft_email` — 邮件起草工具
+- `extract_information` — 信息抽取工具
+
+工具总数从 12 个增至 **15 个**。
+
+### 11.6 前端接口封装（`frontend/src/api/index.js`）
+
+`aiApi` 对象新增 3 个方法：
+
+```js
+aiApi.polishText(text, style)              // POST /ai/polish (query)
+aiApi.draftEmail(scene, recipient, topic, points, original, language)  // POST /ai/draft-email (body)
+aiApi.extractInfo(text, types)             // POST /ai/extract-info (body)
+```
+
+均设置 `timeout: 60000`。
+
+### 11.7 候选待办扫描优化（`backend/routes/todos.py`）
+
+**原问题**：`scan_candidate_todos` 的取消息逻辑是跨所有会话合并取最近 100 条。群聊活跃时，私聊消息挤不进前 100 条，导致私聊待办漏扫。
+
+**优化方案**：
+
+| 会话类型 | 旧逻辑 | 新逻辑 |
+|---------|-------|-------|
+| 群聊 | 取最近 100 条（含无关消息） | 只取 `@所有人` 或 `@当前用户名` 的消息 |
+| 私聊 | 取最近 100 条 | 全量取 |
+| 时间范围 | 固定最近 100 条 | 今日消息 ∪ 最近 100 条（取并集，较大者） |
+
+**实现要点**：
+- 先区分 `group_contact_ids` 和 `private_contact_ids`
+- 群聊查询加 `Message.content.like("%@所有人%") | Message.content.like("%@{user_name}%")` 过滤
+- 分别查"今日消息"和"最近 100 条"，合并后按 message.id 去重
+- 合并后按时间正序排序送入 AI
+
+**效果**：群聊噪声被过滤，私聊不会被群聊淹没，今日全部消息都能扫到。
+
+---
+
+*内部IM智能助手 - 功能实现细节 v3.1 | 2026-07-20*

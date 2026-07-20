@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from dependencies import get_db
 from models import (
     ChatSummary, ChatTodoItem, Message, Contact, UserContact, User,
-    CandidateTodo, ScannedMessage, File, FileCollectionTask,
+    CandidateTodo, ScannedMessage, ScannedEmail, Email, EmailTodoItem,
 )
 from datetime import datetime
 from typing import Optional
@@ -459,25 +459,67 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
     }
     processed_ids = scanned_msg_ids | candidate_msg_ids | todo_msg_ids
 
-    # === 查询未处理的消息（别人发的，且不在 processed_ids 中）===
-    # 先查最近 100 条别人发的消息，再从中过滤未处理的
-    recent_msgs = db.query(Message).filter(
-        Message.contact_id.in_(contact_ids),
-        Message.sender_id != user_id,
-    ).order_by(Message.created_at.desc()).limit(100).all()
+    # === 查询未处理的消息 ===
+    # 优化策略：
+    # - 群聊：只取 @所有人 或 @当前用户 的消息（群聊噪声大，@才有相关性）
+    # - 私聊：全量取（私聊消息量少，都需要看）
+    # - 时间范围：今日消息 与 最近100条 取较大者（保证至少能扫到今天全部 + 历史最近100条）
+    from datetime import date as date_cls
+
+    today_start = datetime.combine(date_cls.today(), datetime.min.time())
+
+    # 区分群聊和私聊的 contact_id
+    group_contact_ids = [c.id for c in all_contacts if c.is_group]
+    private_contact_ids = [c.id for c in all_contacts if not c.is_group]
+
+    # --- 群聊消息：只取 @所有人 或 @当前用户名 的 ---
+    group_msgs_today = []
+    group_msgs_recent = []
+    if group_contact_ids:
+        group_today_q = db.query(Message).filter(
+            Message.contact_id.in_(group_contact_ids),
+            Message.sender_id != user_id,
+            Message.created_at >= today_start,
+            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+        ).all()
+        group_msgs_today = group_today_q
+
+        group_recent_q = db.query(Message).filter(
+            Message.contact_id.in_(group_contact_ids),
+            Message.sender_id != user_id,
+            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+        ).order_by(Message.created_at.desc()).limit(100).all()
+        group_msgs_recent = group_recent_q
+
+    # --- 私聊消息：全量取 ---
+    private_msgs_today = []
+    private_msgs_recent = []
+    if private_contact_ids:
+        private_msgs_today = db.query(Message).filter(
+            Message.contact_id.in_(private_contact_ids),
+            Message.sender_id != user_id,
+            Message.created_at >= today_start,
+        ).all()
+
+        private_msgs_recent = db.query(Message).filter(
+            Message.contact_id.in_(private_contact_ids),
+            Message.sender_id != user_id,
+        ).order_by(Message.created_at.desc()).limit(100).all()
+
+    # 合并：今日消息 与 最近100条 取并集（去重），实现"较大者"
+    # 用 dict 按 message.id 去重，保留 Message 对象
+    merged_by_id = {}
+    for m in group_msgs_today + group_msgs_recent + private_msgs_today + private_msgs_recent:
+        merged_by_id[m.id] = m
+    recent_msgs = list(merged_by_id.values())
 
     unprocessed = [m for m in recent_msgs if m.id not in processed_ids]
-    if not unprocessed:
-        return {
-            "new_count": 0,
-            "message": "没有新的消息需要扫描",
-            "scanned_total": len(recent_msgs),
-            "already_processed": len(recent_msgs),
-        }
+    # 注意：此处不再 early-return，即使没有新消息也要继续扫描邮件
 
     # 构建批量消息（按时间正序）
+    unprocessed.sort(key=lambda m: m.created_at)
     messages_batch = []
-    for m in reversed(unprocessed):
+    for m in unprocessed:
         contact = next((c for c in all_contacts if c.id == m.contact_id), None)
         source_name = contact.name if contact else ""
         source_type = "group" if (contact and contact.is_group) else "private"
@@ -490,11 +532,15 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
             "source_type": source_type,
         })
 
-    # 调用 AI / 规则检测候选待办
-    try:
-        candidates = glm_ai.detect_candidate_todos(messages_batch, user_name)
-    except Exception as e:
-        return {"error": f"AI 检测失败: {e}"}
+    # 调用 AI / 规则检测候选待办（消息为空时跳过 AI 调用）
+    if messages_batch:
+        try:
+            candidates = glm_ai.detect_candidate_todos(messages_batch, user_name)
+        except Exception as e:
+            candidates = []
+            errors = f"消息候选检测失败: {e}"
+    else:
+        candidates = []
 
     # === 保存候选待办（二次去重，防止并发问题）===
     new_count = 0
@@ -542,76 +588,114 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
                 scanned_at=datetime.utcnow(),
             ))
 
-    # === 扫描 Excel 文件收集请求 ===
-    # 查找所有群聊中未处理的 Excel 文件消息（包括自己发送的）
-    file_msgs = db.query(Message).filter(
-        Message.contact_id.in_(contact_ids),
-        Message.message_type == "file",
-        Message.file_id.isnot(None),
-    ).order_by(Message.created_at.desc()).limit(50).all()
+    msg_new_count = new_count
+    msg_scanned_total = len(unprocessed) if 'unprocessed' in locals() else 0
 
-    file_detected = 0
-    for fm in file_msgs:
-        # 检查是否已处理过
-        if fm.id in processed_ids:
-            continue
-        # 检查是否已创建过文件收集任务
-        existing_task = db.query(FileCollectionTask).filter(
-            FileCollectionTask.source_message_id == fm.id
-        ).first()
-        if existing_task:
-            # 标记为已扫描
-            already = db.query(ScannedMessage).filter(
-                ScannedMessage.user_id == user_id,
-                ScannedMessage.message_id == fm.id,
+    # === 扫描邮件 → 候选待办 ===
+    # 已扫描过的邮件集合
+    scanned_email_ids = {
+        se.email_id for se in db.query(ScannedEmail).filter(
+            ScannedEmail.user_id == user_id,
+        ).all()
+    }
+    # 已有候选待办的邮件
+    candidate_email_ids = {
+        c.source_email_id for c in db.query(CandidateTodo).filter(
+            CandidateTodo.user_id == user_id,
+            CandidateTodo.source_email_id.isnot(None),
+        ).all()
+    }
+    # 已有正式邮件待办
+    todo_email_ids = {
+        int(t.source_id) for t in db.query(EmailTodoItem).filter(
+            EmailTodoItem.user_id == user_id,
+            EmailTodoItem.source_id.isnot(None),
+        ).all()
+        if (t.source_id or "").isdigit()
+    }
+    processed_email_ids = scanned_email_ids | candidate_email_ids | todo_email_ids
+
+    # 只扫描收件箱里的原始邮件（非回复）
+    all_emails = db.query(Email).filter(
+        Email.user_id == user_id,
+        Email.is_reply == False,
+    ).order_by(Email.sent_at.desc()).limit(50).all()
+
+    unprocessed_emails = [e for e in all_emails if e.id not in processed_email_ids]
+    email_new_count = 0
+    if unprocessed_emails:
+        # 构建邮件批量数据
+        emails_batch = []
+        for e in unprocessed_emails:
+            emails_batch.append({
+                "id": e.id,
+                "subject": e.subject or "",
+                "sender": e.sender or "",
+                "content": e.content or "",
+            })
+        try:
+            email_candidates = glm_ai.detect_email_candidate_todos(emails_batch, user_name)
+        except Exception as e:
+            email_candidates = []
+            errors_email = f"邮件候选检测失败: {e}"
+        else:
+            errors_email = None
+
+        for c in email_candidates:
+            email_id = c.get("id")
+            if not email_id:
+                continue
+            # 二次去重
+            existing = db.query(CandidateTodo).filter(
+                CandidateTodo.user_id == user_id,
+                CandidateTodo.source_email_id == email_id,
+            ).first()
+            if existing:
+                continue
+            email_data = next((x for x in emails_batch if x["id"] == email_id), None)
+            if not email_data:
+                continue
+            candidate = CandidateTodo(
+                user_id=user_id,
+                source_message_id=None,
+                source_email_id=email_id,
+                source_type="email",
+                source_name=email_data["subject"],
+                content=c.get("content", ""),
+                deadline=_parse_deadline(c.get("deadline")),
+                status="pending",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(candidate)
+            email_new_count += 1
+
+        # 标记本次扫描的邮件
+        for e in emails_batch:
+            already = db.query(ScannedEmail).filter(
+                ScannedEmail.user_id == user_id,
+                ScannedEmail.email_id == e["id"],
             ).first()
             if not already:
-                db.add(ScannedMessage(
+                db.add(ScannedEmail(
                     user_id=user_id,
-                    message_id=fm.id,
+                    email_id=e["id"],
                     scanned_at=datetime.utcnow(),
                 ))
-            continue
-
-        # 检查文件是否为 Excel
-        file_obj = db.query(File).filter(File.id == fm.file_id).first()
-        if not file_obj or not file_obj.name.lower().endswith((".xlsx", ".xls")):
-            continue
-
-        # 检查是否在群聊中
-        contact = next((c for c in all_contacts if c.id == fm.contact_id), None)
-        if not contact or not contact.is_group:
-            continue
-
-        # 调用文件收集检测
-        try:
-            from routes.file_collection import _detect_file_collection
-            result = _detect_file_collection(fm.id, db)
-            if result.get("detected"):
-                file_detected += 1
-                new_count += result.get("todos_created", 0)
-        except Exception:
-            pass
-
-        # 标记为已扫描
-        already = db.query(ScannedMessage).filter(
-            ScannedMessage.user_id == user_id,
-            ScannedMessage.message_id == fm.id,
-        ).first()
-        if not already:
-            db.add(ScannedMessage(
-                user_id=user_id,
-                message_id=fm.id,
-                scanned_at=datetime.utcnow(),
-            ))
 
     db.commit()
+
+    total_new = msg_new_count + email_new_count
+    email_scanned_total = len(unprocessed_emails)
+    msg_str = f"检测 {msg_scanned_total} 条新消息，发现 {msg_new_count} 条消息候选待办"
+    email_str = f"检测 {email_scanned_total} 封新邮件，发现 {email_new_count} 条邮件候选待办"
     return {
-        "new_count": new_count,
-        "file_detected": file_detected,
-        "message": f"扫描完成：检测 {len(unprocessed)} 条新消息，发现 {new_count} 条候选待办" + (f"，检测到 {file_detected} 个文件收集请求" if file_detected > 0 else ""),
-        "scanned_total": len(unprocessed),
-        "already_processed": len(recent_msgs) - len(unprocessed),
+        "new_count": total_new,
+        "message": f"扫描完成：{msg_str}；{email_str}",
+        "scanned_total": msg_scanned_total + email_scanned_total,
+        "message_candidates": msg_new_count,
+        "email_candidates": email_new_count,
+        "already_processed": (len(recent_msgs) - msg_scanned_total) if 'recent_msgs' in locals() else 0,
     }
 
 
@@ -632,6 +716,7 @@ def get_candidate_todos(
         {
             "id": c.id,
             "source_message_id": c.source_message_id,
+            "source_email_id": c.source_email_id,
             "source_type": c.source_type,
             "source_name": c.source_name,
             "content": c.content,
@@ -645,14 +730,47 @@ def get_candidate_todos(
 
 @router.post("/candidates/{candidate_id}/confirm")
 def confirm_candidate(candidate_id: int, db: Session = Depends(get_db)):
-    """确认候选待办：转为正式待办。"""
+    """确认候选待办：转为正式待办。
+    - source_type 为 email 时，创建 EmailTodoItem
+    - 其他来源（group/private）创建 ChatTodoItem
+    """
     candidate = db.query(CandidateTodo).filter(CandidateTodo.id == candidate_id).first()
     if not candidate:
         return {"error": "候选待办不存在"}
     if candidate.status != "pending":
         return {"error": f"该候选待办已处理（状态: {candidate.status}）"}
 
-    # 创建正式待办
+    now = datetime.utcnow()
+
+    if candidate.source_type == "email":
+        # 查找邮件以补全 subject/sender
+        email = db.query(Email).filter(Email.id == candidate.source_email_id).first() if candidate.source_email_id else None
+        todo = EmailTodoItem(
+            user_id=candidate.user_id,
+            source_id=str(candidate.source_email_id) if candidate.source_email_id else "",
+            subject=email.subject if email else (candidate.source_name or ""),
+            sender=email.sender if email else "",
+            content=candidate.content,
+            deadline=candidate.deadline,
+            status="pending",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(todo)
+        candidate.status = "confirmed"
+        candidate.updated_at = now
+        db.commit()
+        db.refresh(todo)
+        return {
+            "todo_id": todo.id,
+            "candidate_id": candidate.id,
+            "todo_type": "email",
+            "content": todo.content,
+            "status": "confirmed",
+            "message": "候选待办已确认并转为邮件待办",
+        }
+
+    # 创建正式消息待办
     todo = ChatTodoItem(
         user_id=candidate.user_id,
         source_id=candidate.source_message_id,

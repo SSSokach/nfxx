@@ -8,6 +8,18 @@
           <div class="sidebar-brand-subtitle">聊天、文件与智能协作面板</div>
         </div>
       </div>
+      <div class="view-toggle-row">
+        <button
+          class="view-toggle-btn"
+          :class="{ active: viewMode === 'messages' }"
+          @click="switchView('messages')"
+        >💬 消息</button>
+        <button
+          class="view-toggle-btn"
+          :class="{ active: viewMode === 'emails' }"
+          @click="switchView('emails')"
+        >✉️ 邮箱</button>
+      </div>
       <div class="user-switcher">
         <span>当前用户</span>
         <select v-model="currentUserId" @change="handleUserChange">
@@ -52,10 +64,11 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { usersApi, chatsApi } from '../api'
 
-const emit = defineEmits(['user-change', 'contact-select'])
+const emit = defineEmits(['user-change', 'contact-select', 'view-change'])
 
 const props = defineProps({
-  refreshKey: { type: Number, default: 0 }
+  refreshKey: { type: Number, default: 0 },
+  viewMode: { type: String, default: 'messages' }
 })
 
 const users = ref([])
@@ -91,6 +104,10 @@ const handleUserChange = () => {
   loadContacts()
 }
 
+const switchView = (mode) => {
+  if (mode !== props.viewMode) emit('view-change', mode)
+}
+
 const formatTime = (timeStr) => {
   if (!timeStr) return ''
   const date = new Date(timeStr)
@@ -107,3 +124,38 @@ watch(() => props.refreshKey, () => {
   loadContacts()
 })
 </script>
+
+<style scoped>
+.view-toggle-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 4px;
+  background: rgba(232, 238, 247, 0.7);
+  border-radius: 12px;
+}
+
+.view-toggle-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.view-toggle-btn:hover:not(.active) {
+  color: #667eea;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.view-toggle-btn.active {
+  background: #ffffff;
+  color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.16);
+}
+</style>

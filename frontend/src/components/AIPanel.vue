@@ -47,7 +47,7 @@
           <div v-if="aiLoading" class="ai-message assistant">处理中...</div>
         </div>
 
-        <div class="ai-context-banner" v-if="localContext">
+        <div class="ai-context-banner" :class="{ email: localContext?.source_type === 'email' }" v-if="localContext">
           <div class="ai-context-card">
             <div class="ai-context-line"></div>
             <div class="ai-context-body">
@@ -114,7 +114,8 @@
             >
               <div class="candidate-content">{{ c.content }}</div>
               <div class="candidate-meta">
-                <span class="meta-tag" v-if="c.source_type === 'group'">👥 {{ c.source_name }}</span>
+                <span class="meta-tag email" v-if="c.source_type === 'email'">✉️ {{ c.source_name }}</span>
+                <span class="meta-tag" v-else-if="c.source_type === 'group'">👥 {{ c.source_name }}</span>
                 <span class="meta-tag" v-else>💬 {{ c.source_name }}</span>
                 <span class="meta-time" v-if="c.deadline">⏰ {{ formatDate(c.deadline) }}</span>
               </div>
@@ -143,50 +144,19 @@
               class="todo-item"
               :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed' }"
             >
-              <!-- 文件收集类待办: 显示进度条 -->
-              <template v-if="isFileCollectionTodo(todo)">
-                <div class="todo-content cursor-pointer" @click="onFileCollectionTodoClick(todo)">{{ todo.content || todo.title }}</div>
-                <div class="todo-meta">
-                  <span class="meta-tag">👥 群聊</span>
-                  <span class="meta-tag" v-if="todo.group_name">📁 {{ todo.group_name }}</span>
-                  <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
-                  <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
-                </div>
-                <!-- 进度条 + 未填写人员 -->
-                <div class="fc-progress-inline" v-if="getFcTaskForTodo(todo)">
-                  <div class="fc-progress-bar">
-                    <div class="fc-progress-fill" :class="{ done: getFcTaskForTodo(todo).submitted === getFcTaskForTodo(todo).total }" :style="{ width: (getFcTaskForTodo(todo).total > 0 ? (getFcTaskForTodo(todo).submitted / getFcTaskForTodo(todo).total * 100) : 0) + '%' }"></div>
-                  </div>
-                  <div class="fc-unfilled-list" v-if="getUnfilledAssignees(todo).length > 0">
-                    <span class="fc-unfilled-label">未填写：</span>
-                    <span v-for="name in getUnfilledAssignees(todo)" :key="name" class="fc-unfilled-chip">{{ name }}</span>
-                  </div>
-                  <div class="fc-all-done" v-else>全部已提交 ✓</div>
-                  <button class="fc-scan-btn" @click="scanExcelProgress(todo)" :disabled="fcScanning">
-                    {{ fcScanning ? '扫描中...' : '扫描Excel进度' }}
-                  </button>
-                </div>
-                <div class="todo-actions" v-if="todo.status === 'pending'">
-                  <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
-                  <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
-                </div>
-              </template>
-              <!-- 普通待办 -->
-              <template v-else>
-                <div class="todo-content" :class="{ 'cursor-pointer': isFileFillTodo(todo) }" @click="onFileFillTodoClick(todo)">{{ todo.content || todo.title }}</div>
-                <div class="todo-meta">
-                  <span class="meta-tag" v-if="todo.source_type === 'email'">✉️ 邮件</span>
-                  <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
-                  <span class="meta-tag" v-else>👥 群聊</span>
-                  <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
-                  <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
-                  <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
-                </div>
-                <div class="todo-actions" v-if="todo.status === 'pending'">
-                  <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
-                  <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
-                </div>
-              </template>
+              <div class="todo-content">{{ todo.content || todo.title }}</div>
+              <div class="todo-meta">
+                <span class="meta-tag email" v-if="todo.source_type === 'email'">✉️ 邮件</span>
+                <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
+                <span class="meta-tag" v-else>👥 群聊</span>
+                <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
+                <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
+                <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
+              </div>
+              <div class="todo-actions" v-if="todo.status === 'pending'">
+                <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
+                <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
+              </div>
             </div>
           </div>
         </div>
@@ -257,7 +227,7 @@
 
 <script setup>
 import { ref, watch, nextTick, computed, onMounted } from 'vue'
-import { aiApi, todosApi, emailsApi, fileCollectionApi, formsApi, chatsApi, onlineFormsApi } from '../api'
+import { aiApi, todosApi, emailsApi, formsApi, chatsApi, onlineFormsApi } from '../api'
 import OnlineFormModal from './OnlineFormModal.vue'
 import { marked } from 'marked'
 
@@ -268,8 +238,6 @@ const props = defineProps({
   contextMessage: { type: Object, default: null },
   todoRefreshKey: { type: Number, default: 0 }
 })
-
-const emit = defineEmits(['preview-excel'])
 
 // ===== Tab management =====
 const activeTab = ref('chat')
@@ -289,7 +257,6 @@ const switchTab = (key) => {
   if (key === 'todo') {
     loadAllTodos()
     loadCandidates()
-    loadFileCollectionTasks()
   }
   if (key === 'forms') {
     loadFormTrackers()
@@ -377,104 +344,9 @@ watch(() => props.currentUserId, () => {
   chatTodos.value = []
   emailTodos.value = []
   candidateTodos.value = []
-  fcInitiatedTasks.value = []
-  fcAssignedTasks.value = []
   loadAllTodos()
   loadCandidates()
-  loadFileCollectionTasks()
 })
-
-// ===== File Collection =====
-const fcInitiatedTasks = ref([])
-const fcAssignedTasks = ref([])
-const fcLoading = ref(false)
-const fcError = ref('')
-
-const loadFileCollectionTasks = async () => {
-  if (!props.currentUserId) return
-  fcLoading.value = true
-  fcError.value = ''
-  try {
-    const res = await fileCollectionApi.getTasks(props.currentUserId)
-    const all = res.data || []
-    fcInitiatedTasks.value = all.filter(t => t.role === 'initiator')
-    fcAssignedTasks.value = all.filter(t => t.role === 'assignee')
-  } catch (e) {
-    fcError.value = '加载失败'
-  }
-  fcLoading.value = false
-}
-
-const submitFileCollection = async (task) => {
-  fcError.value = ''
-  try {
-    await fileCollectionApi.submitItem(task.item_id)
-    await loadFileCollectionTasks()
-    await loadAllTodos()
-  } catch (e) {
-    fcError.value = '提交失败'
-  }
-}
-
-// ===== 文件收集待办辅助方法 =====
-const isFileCollectionTodo = (todo) => {
-  const text = todo.content || todo.title || ''
-  return text.includes('[文件收集]')
-}
-
-const getFcTaskForTodo = (todo) => {
-  const text = todo.content || todo.title || ''
-  // 从待办内容中提取文件名
-  const match = text.match(/\[文件收集\]\s*(.+?)\s*-/)
-  if (!match) return null
-  const fileName = match[1].trim()
-  return fcInitiatedTasks.value.find(t => t.file_name === fileName)
-}
-
-const getUnfilledAssignees = (todo) => {
-  const task = getFcTaskForTodo(todo)
-  if (!task || !task.items) return []
-  return task.items
-    .filter(item => item.status !== 'submitted')
-    .map(item => item.assignee_name)
-}
-
-const onFileCollectionTodoClick = (todo) => {
-  const task = getFcTaskForTodo(todo)
-  if (task) {
-    emit('preview-excel', { file_name: task.file_name })
-  }
-}
-
-const isFileFillTodo = (todo) => {
-  const text = todo.content || todo.title || ''
-  return text.includes('[填写文件]')
-}
-
-const onFileFillTodoClick = (todo) => {
-  const text = todo.content || todo.title || ''
-  // 从待办内容中提取文件名
-  const match = text.match(/\[填写文件\]\s*(.+?)\s*[-—]/)
-  if (match) {
-    emit('preview-excel', { file_name: match[1].trim() })
-  }
-}
-
-const fcScanning = ref(false)
-
-const scanExcelProgress = async (todo) => {
-  const task = getFcTaskForTodo(todo)
-  if (!task) return
-  fcScanning.value = true
-  try {
-    await fileCollectionApi.scanProgress(task.task_id)
-    await loadFileCollectionTasks()
-    await loadAllTodos()
-  } catch (e) {
-    // ignore
-  }
-  fcScanning.value = false
-}
 
 const clearContext = () => {
   localContext.value = null
@@ -507,7 +379,8 @@ const sendAiMessage = async (overrideMsg) => {
   let prompt = userMsg
   if (localContext.value) {
     const ctx = localContext.value
-    prompt = `消息内容来自${ctx.sender_name}：「${ctx.content}」\n用户问题：${userMsg}`
+    const sourceLabel = ctx.source_type === 'email' ? '邮件' : '消息'
+    prompt = `${sourceLabel}内容来自${ctx.sender_name}：「${ctx.content}」\n用户问题：${userMsg}`
   }
 
   aiMessages.value.push({ role: 'user', content: userMsg })
@@ -955,6 +828,19 @@ const checkAllForms = async () => {
   color: #333;
 }
 
+.ai-context-banner.email {
+  background-color: #fef3c7;
+  border-top-color: #fde68a;
+}
+
+.ai-context-banner.email .ai-context-line {
+  background-color: #d97706;
+}
+
+.ai-context-banner.email .ai-context-name {
+  color: #b45309;
+}
+
 /* ===== AI message markdown ===== */
 .ai-message-markdown {
   line-height: 1.7;
@@ -1209,15 +1095,6 @@ const checkAllForms = async () => {
   margin-bottom: 6px;
 }
 
-.cursor-pointer {
-  cursor: pointer;
-}
-
-.cursor-pointer:hover {
-  color: #667eea;
-  text-decoration: underline;
-}
-
 .todo-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1231,6 +1108,12 @@ const checkAllForms = async () => {
   background-color: #eef0ff;
   padding: 2px 7px;
   border-radius: 10px;
+}
+
+/* 邮件待办 tag 用琥珀色区分 */
+.meta-tag.email {
+  background-color: #fef3c7;
+  color: #b45309;
 }
 
 .meta-time {
@@ -1396,87 +1279,6 @@ const checkAllForms = async () => {
 /* Override todo-list for compact scroll area */
 .todo-scroll .todo-item {
   margin-bottom: 8px;
-}
-
-<<<<<<< HEAD
-/* ===== File Collection inline progress in todo list ===== */
-.fc-progress-inline {
-  margin-top: 8px;
-}
-
-.fc-progress-bar {
-  height: 8px;
-  background: #e8eaf0;
-  border-radius: 999px;
-  overflow: hidden;
-  margin-bottom: 6px;
-}
-
-.fc-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-  border-radius: 999px;
-  transition: width 0.3s ease;
-}
-
-.fc-progress-fill.done {
-  background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
-}
-
-.fc-unfilled-list {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.fc-unfilled-label {
-  font-size: 11px;
-  color: #9ca3af;
-  font-weight: 500;
-}
-
-.fc-unfilled-chip {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
-  font-size: 11px;
-  color: #d97706;
-}
-
-.fc-all-done {
-  font-size: 12px;
-  color: #16a34a;
-  font-weight: 500;
-}
-
-.fc-scan-btn {
-  margin-top: 6px;
-  padding: 3px 10px;
-  border: 1px solid #667eea;
-  border-radius: 6px;
-  background: #fff;
-  color: #667eea;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.fc-scan-btn:hover:not(:disabled) {
-  background: #667eea;
-  color: #fff;
-}
-
-.fc-scan-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.fc-hint {
-  font-size: 12px;
-  color: #9ca3af;
-  margin-top: 8px;
 }
 
 /* ===== AI Usage Bar ===== */

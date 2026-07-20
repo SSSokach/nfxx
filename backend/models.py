@@ -152,7 +152,8 @@ class CandidateTodo(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
-    source_type = Column(String, default="group")  # group / private
+    source_email_id = Column(Integer, nullable=True)  # 邮件来源（无外键约束，引用 Email.id）
+    source_type = Column(String, default="group")  # group / private / email
     source_name = Column(String, nullable=True)
     content = Column(Text)
     deadline = Column(Date, nullable=True)
@@ -170,33 +171,13 @@ class ScannedMessage(Base):
     scanned_at = Column(DateTime, default=datetime.utcnow)
 
 
-class FileCollectionTask(Base):
-    """文件收集任务表 - 发起人创建的文件收集任务"""
-    __tablename__ = "file_collection_task"
+class ScannedEmail(Base):
+    """已扫描邮件记录表 - 记录哪些邮件已经被候选待办扫描处理过"""
+    __tablename__ = "scanned_email"
     id = Column(Integer, primary_key=True, index=True)
-    initiator_user_id = Column(Integer, ForeignKey("users.id"))
-    source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
-    group_name = Column(String, nullable=True)
-    file_name = Column(String)
-    description = Column(Text, default="")
-    deadline = Column(Date, nullable=True)
-    status = Column(String, default="collecting")  # collecting / completed / cancelled
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-    items = relationship("FileCollectionItem", backref="task", cascade="all, delete-orphan")
-
-
-class FileCollectionItem(Base):
-    """文件收集明细表 - 每个待填写人的填写状态"""
-    __tablename__ = "file_collection_item"
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("file_collection_task.id"))
-    assignee_user_id = Column(Integer, ForeignKey("users.id"))
-    assignee_name = Column(String)
-    status = Column(String, default="pending")  # pending / submitted
-    submitted_file_id = Column(Integer, ForeignKey("files.id"), nullable=True)
-    submitted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    email_id = Column(Integer, ForeignKey("emails.id"))
+    scanned_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Email(Base):
@@ -213,6 +194,10 @@ class Email(Base):
     reply_to_email_id = Column(Integer, nullable=True)
     sent_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # 邮箱页面扩展字段
+    folder = Column(String, default="inbox")  # inbox / sent / draft
+    body_type = Column(String, default="text")  # text / markdown
+    attachment_file_ids = Column(Text, default="")  # 逗号分隔的 File.id
 
 
 class FormTracker(Base):
