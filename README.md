@@ -130,7 +130,7 @@ npm install
 
 ```bash
 cd backend
-python3 -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn app:app --reload --host 0.0.0.0 --port 18000
 ```
 
 或使用启动脚本：
@@ -140,7 +140,7 @@ python3 -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ./restart.sh    # 重启服务
 ```
 
-后端服务将在 `http://localhost:8000` 运行，支持代码热更新。
+后端服务将在 `http://localhost:18000` 运行，支持代码热更新。
 首次启动时会自动执行轻量级 DB 迁移（为已有表添加 folder / body_type / attachment_file_ids / source_email_id 等列）。
 
 ### 启动前端开发服务器
@@ -169,10 +169,10 @@ npm run build
 
 ```bash
 cd backend
-python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 ```
 
-后端将自动提供前端静态文件，直接访问 `http://localhost:8000` 即可。
+后端将自动提供前端静态文件，直接访问 `http://localhost:18000` 即可。
 
 ### 3. 打包，部署到服务器
 
@@ -201,7 +201,7 @@ pip3 install --no-index --find-links=packages_arm -r requirements.txt
 
 ```bash
 cd /home/longbook/nfxx/backend
-python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 ```
 
 ## API接口
