@@ -1,11 +1,12 @@
-"""邮件路由：邮件列表、邮件待办、邮件回复追踪。"""
+"""邮件路由：邮件列表、邮件详情、发送邮件、邮件待办、邮件回复追踪。"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from dependencies import get_db
-from models import Email, EmailTodoItem, EmailTracker
+from models import Email, EmailTodoItem, EmailTracker, File, User
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import glm_ai
 
 router = APIRouter()
@@ -21,31 +22,179 @@ def _parse_deadline(deadline_str):
         return None
 
 
+def _parse_attachment_ids(attachment_file_ids):
+    """将逗号分隔的 file_id 字符串解析为 List[int]。"""
+    if not attachment_file_ids:
+        return []
+    ids = []
+    for part in str(attachment_file_ids).split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    return ids
+
+
+def _email_summary_dict(e):
+    """邮件列表项（不含附件内容，体积小）。"""
+    return {
+        "id": e.id,
+        "subject": e.subject,
+        "sender": e.sender,
+        "sender_dept": e.sender_dept,
+        "recipients": e.recipients,
+        "content": e.content,
+        "is_reply": e.is_reply,
+        "reply_to_email_id": e.reply_to_email_id,
+        "sent_at": e.sent_at.isoformat() if e.sent_at else None,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "folder": e.folder or "inbox",
+        "body_type": e.body_type or "text",
+        "has_attachments": len(_parse_attachment_ids(e.attachment_file_ids)) > 0,
+    }
+
+
+def _email_detail_dict(e, db):
+    """邮件详情（含附件文件名与内容）。"""
+    attachment_ids = _parse_attachment_ids(e.attachment_file_ids)
+    attachments = []
+    if attachment_ids:
+        files = db.query(File).filter(File.id.in_(attachment_ids)).all()
+        files_map = {f.id: f for f in files}
+        # 保持用户填写的顺序
+        for fid in attachment_ids:
+            f = files_map.get(fid)
+            if f:
+                attachments.append({
+                    "id": f.id,
+                    "name": f.name,
+                    "file_type": f.file_type,
+                    "content": f.content or "",
+                    "size": len(f.content) if f.content else 0,
+                })
+    return {
+        **_email_summary_dict(e),
+        "attachment_file_ids": attachment_ids,
+        "attachments": attachments,
+    }
+
+
 # ------------------------------------------------------------------ #
 #  邮件列表
 # ------------------------------------------------------------------ #
 
 @router.get("/list/{user_id}")
-def get_email_list(user_id: int, db: Session = Depends(get_db)):
-    """获取用户邮件列表。"""
-    emails = db.query(Email).filter(
-        Email.user_id == user_id
-    ).order_by(Email.sent_at.desc()).all()
-    return [
-        {
-            "id": e.id,
-            "subject": e.subject,
-            "sender": e.sender,
-            "sender_dept": e.sender_dept,
-            "recipients": e.recipients,
-            "content": e.content,
-            "is_reply": e.is_reply,
-            "reply_to_email_id": e.reply_to_email_id,
-            "sent_at": e.sent_at.isoformat() if e.sent_at else None,
-            "created_at": e.created_at.isoformat() if e.created_at else None,
-        }
-        for e in emails
-    ]
+def get_email_list(
+    user_id: int,
+    folder: Optional[str] = Query(None, description="inbox / sent / draft，不填则返回全部"),
+    db: Session = Depends(get_db),
+):
+    """获取用户邮件列表，支持按 folder 过滤。"""
+    query = db.query(Email).filter(Email.user_id == user_id)
+    if folder:
+        query = query.filter(Email.folder == folder)
+    emails = query.order_by(Email.sent_at.desc()).all()
+    return [_email_summary_dict(e) for e in emails]
+
+
+# ------------------------------------------------------------------ #
+#  邮件详情
+# ------------------------------------------------------------------ #
+
+@router.get("/detail/{email_id}")
+def get_email_detail(email_id: int, db: Session = Depends(get_db)):
+    """获取单封邮件详情，包含附件文件名与内容。"""
+    e = db.query(Email).filter(Email.id == email_id).first()
+    if not e:
+        return {"error": "邮件不存在"}
+    return _email_detail_dict(e, db)
+
+
+# ------------------------------------------------------------------ #
+#  发送邮件
+# ------------------------------------------------------------------ #
+
+class SendEmailRequest(BaseModel):
+    to: str
+    subject: str
+    content: str
+    body_type: str = "markdown"
+    attachment_file_ids: List[int] = []
+
+
+@router.post("/send/{user_id}")
+def send_email(user_id: int, req: SendEmailRequest, db: Session = Depends(get_db)):
+    """发送新邮件（写入已发送箱）。"""
+    user = db.query(User).filter(User.id == user_id).first()
+    sender_str = f"{user.name} <{user.name.lower()}@company.com>" if user else "me@company.com"
+    sender_dept = user.name if user else ""
+
+    attachment_ids_str = ",".join(str(i) for i in req.attachment_file_ids) if req.attachment_file_ids else ""
+
+    email = Email(
+        user_id=user_id,
+        subject=req.subject or "(无主题)",
+        sender=sender_str,
+        sender_dept=sender_dept,
+        recipients=req.to,
+        content=req.content,
+        is_reply=False,
+        reply_to_email_id=None,
+        sent_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+        folder="sent",
+        body_type=req.body_type or "markdown",
+        attachment_file_ids=attachment_ids_str,
+    )
+    db.add(email)
+    db.commit()
+    db.refresh(email)
+    return {
+        "id": email.id,
+        "folder": email.folder,
+        "message": "邮件已发送",
+        "email": _email_detail_dict(email, db),
+    }
+
+
+# ------------------------------------------------------------------ #
+#  从邮件直接加入待办（用户手动添加，不经过候选）
+# ------------------------------------------------------------------ #
+
+@router.post("/add-to-todo/{user_id}/{email_id}")
+def add_email_to_todo(user_id: int, email_id: int, db: Session = Depends(get_db)):
+    """将一封邮件直接加入待办列表（EmailTodoItem，status=pending）。"""
+    email = db.query(Email).filter(Email.id == email_id, Email.user_id == user_id).first()
+    if not email:
+        return {"error": "邮件不存在"}
+
+    # 去重：同 source_id 已存在则返回已有待办
+    existing = db.query(EmailTodoItem).filter(
+        EmailTodoItem.user_id == user_id,
+        EmailTodoItem.source_id == str(email_id),
+    ).first()
+    if existing:
+        return {"message": "该邮件已加入待办", "todo_id": existing.id}
+
+    todo = EmailTodoItem(
+        user_id=user_id,
+        source_id=str(email_id),
+        subject=email.subject,
+        sender=email.sender,
+        content=email.content[:500] if email.content else "",
+        deadline=None,
+        status="pending",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(todo)
+    db.commit()
+    db.refresh(todo)
+    return {
+        "todo_id": todo.id,
+        "subject": todo.subject,
+        "status": todo.status,
+        "message": "已加入待办列表",
+    }
 
 
 # ------------------------------------------------------------------ #

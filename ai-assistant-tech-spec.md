@@ -123,6 +123,76 @@
 
 定时任务（默认每 1 小时）通过 WPS API 获取文档最新内容，判断每行人员是否已填写。此功能后续可通过 AI 对话触发查询。
 
+### 2.8 邮箱页面（已实现）
+
+在「AI办公助手」左上角新增视图切换按钮，支持在「消息」视图与「邮箱」视图之间切换。切换后左栏与中栏分别替换为邮件列表与邮件详情/写邮件，右侧 AI 助手面板保持不变。
+
+#### 2.8.1 前端展示
+
+- **视图切换**：ContactList 顶部 `view-toggle-row` 提供「💬 消息 / ✉️ 邮箱」两个按钮，通过 App.vue 的 `viewMode` 状态控制条件渲染。
+- **左栏 EmailList**：包含「收件箱 / 已发送 / 写邮件」三个 Tab，支持 Markdown 与附件标识（badge），右键弹出菜单（🤖 AI对话 / 📋 加入待办）。
+- **中栏 EmailDetail**：
+  - **详情模式**：展示主题、发件人/部门、收件人、时间、正文（支持 Markdown 渲染与纯文本）、附件列表（可点击预览），提供回复/转发按钮。
+  - **写邮件模式**：表单包含收件人、主题、正文类型切换（markdown/text）、正文输入框（Markdown 模式下提供实时预览）、附件选择器（从已有文件列表多选）。
+- **右栏 AIPanel**：保持不变；当以邮件上下文打开 AI 对话时，引用横幅显示为琥珀色（区别于消息的蓝紫色）。
+
+#### 2.8.2 行为逻辑
+
+1. **收发功能**：`POST /api/emails/send/{user_id}` 创建邮件并将 `folder` 设置为 `sent`；收件箱通过 `GET /api/emails/list/{user_id}?folder=inbox` 获取。
+2. **右键菜单 - AI对话**：右键邮件 → 调用 `GET /api/emails/detail/{email_id}` 获取正文与附件 → 拼接为引用上下文 → 在右侧 AI 对话面板中打开，提示用户输入问题。上下文横幅使用邮件来源标签（✉️ 邮件）。
+3. **右键菜单 - 加入待办**：右键邮件 → 调用 `POST /api/emails/add-to-todo/{user_id}/{email_id}` → 直接创建 `EmailTodoItem`（跳过候选阶段，进入正式待办列表）。
+4. **AI 扫描邮件**：`POST /api/todos/scan-candidates/{user_id` 同时扫描消息与邮件，未处理的新邮件通过 `glm_ai.detect_email_candidate_todos` 提取候选待办，写入 `CandidateTodo` 表（`source_type='email'`），并登记 `ScannedEmail` 用于去重。
+5. **候选确认分支**：`POST /api/todos/candidates/{candidate_id}/confirm` 根据 `source_type` 分支：
+   - `email` → 创建 `EmailTodoItem`
+   - 其他 → 创建 `ChatTodoItem`
+6. **待办 tag 区分**：AIPanel 待办列表中，邮件来源显示 ✉️ 邮件 tag（琥珀色），消息来源显示 💬 私聊 / 👥 群聊 tag（蓝紫色）。
+
+#### 2.8.3 数据模型扩展
+
+**Email 表新增列：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| folder | String | `inbox` / `sent` / `draft`，默认 `inbox` |
+| body_type | String | `markdown` / `text`，默认 `markdown` |
+| attachment_file_ids | String | 附件 File ID 列表，逗号分隔 |
+
+**CandidateTodo 表新增列：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| source_email_id | Integer | 来源邮件 ID（消息候选为空） |
+| source_type | String | `message` / `email`，默认 `message` |
+
+**新增表 ScannedEmail（邮件扫描去重）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 主键 |
+| user_id | Integer | 用户 ID |
+| email_id | Integer | 邮件 ID |
+| scanned_at | Datetime | 扫描时间 |
+
+#### 2.8.4 关键 API
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/emails/list/{user_id}?folder=inbox\|sent\|draft` | 获取邮件列表（按文件夹过滤） |
+| `GET /api/emails/detail/{email_id}` | 获取邮件详情（含附件内容） |
+| `POST /api/emails/send/{user_id}` | 发送新邮件（body: `{to, subject, content, body_type, attachment_file_ids}`） |
+| `POST /api/emails/add-to-todo/{user_id}/{email_id}` | 将邮件直接加入待办（不经候选阶段） |
+| `POST /api/todos/scan-candidates/{user_id}` | 同时扫描消息+邮件，生成候选待办 |
+| `POST /api/todos/candidates/{candidate_id}/confirm` | 确认候选（邮件→EmailTodoItem，消息→ChatTodoItem） |
+
+#### 2.8.5 AI skill：邮件摘要
+
+新增 `SKILL_EMAIL_SUMMARY`（Priority 4）：
+
+- **触发关键词**：`邮件摘要`、`总结邮件`、`总结这封邮件`、`邮件总结`
+- **触发正则**：`/邮件摘要|总结.{0,4}邮件/`
+- **system_prompt**：引导大模型对引用邮件的正文与附件内容生成结构化摘要（核心事项、关键时间、需跟进的待办、风险提示），并以 Markdown 输出。
+- **调用方式**：邮件列表右键 → AI对话 → 在右侧 AI 面板输入「总结这封邮件」即可触发。
+
 ## 3. 优先级与迭代计划
 
 | 优先级 | 功能模块 | 说明 |
@@ -130,6 +200,7 @@
 | P0 | AI 对话统一入口 | 快捷提示气泡 + 文件摘要/工作报告通过对话完成 |
 | P0 | 待办合并 | 消息+邮件待办统一列表 + 气泡式创建 + 完成/删除/超期标红 |
 | P0 | 智能回复气泡 | 聊天区域输入栏上方弹出智能回复气泡（目前占位文本） |
+| P0 | 邮箱页面 | 视图切换 + 收件箱/已发送/写邮件 + 右键 AI对话/加入待办 + 待办 tag 区分 |
 | P1 | 邮件回复追踪 | 自动检测已回复/未回复部门并汇总（后续通过 AI 对话查询） |
 | P1 | 文件回填检测 | 定时检测云文档填写状态，依赖 WPS API 和定时任务 |
 

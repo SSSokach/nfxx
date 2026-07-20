@@ -47,7 +47,7 @@
           <div v-if="aiLoading" class="ai-message assistant">处理中...</div>
         </div>
 
-        <div class="ai-context-banner" v-if="localContext">
+        <div class="ai-context-banner" :class="{ email: localContext?.source_type === 'email' }" v-if="localContext">
           <div class="ai-context-card">
             <div class="ai-context-line"></div>
             <div class="ai-context-body">
@@ -114,7 +114,8 @@
             >
               <div class="candidate-content">{{ c.content }}</div>
               <div class="candidate-meta">
-                <span class="meta-tag" v-if="c.source_type === 'group'">👥 {{ c.source_name }}</span>
+                <span class="meta-tag email" v-if="c.source_type === 'email'">✉️ {{ c.source_name }}</span>
+                <span class="meta-tag" v-else-if="c.source_type === 'group'">👥 {{ c.source_name }}</span>
                 <span class="meta-tag" v-else>💬 {{ c.source_name }}</span>
                 <span class="meta-time" v-if="c.deadline">⏰ {{ formatDate(c.deadline) }}</span>
               </div>
@@ -145,7 +146,7 @@
             >
               <div class="todo-content">{{ todo.content || todo.title }}</div>
               <div class="todo-meta">
-                <span class="meta-tag" v-if="todo.source_type === 'email'">✉️ 邮件</span>
+                <span class="meta-tag email" v-if="todo.source_type === 'email'">✉️ 邮件</span>
                 <span class="meta-tag" v-else-if="todo.source_type === 'private'">💬 私聊</span>
                 <span class="meta-tag" v-else>👥 群聊</span>
                 <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
@@ -378,7 +379,8 @@ const sendAiMessage = async (overrideMsg) => {
   let prompt = userMsg
   if (localContext.value) {
     const ctx = localContext.value
-    prompt = `消息内容来自${ctx.sender_name}：「${ctx.content}」\n用户问题：${userMsg}`
+    const sourceLabel = ctx.source_type === 'email' ? '邮件' : '消息'
+    prompt = `${sourceLabel}内容来自${ctx.sender_name}：「${ctx.content}」\n用户问题：${userMsg}`
   }
 
   aiMessages.value.push({ role: 'user', content: userMsg })
@@ -826,6 +828,19 @@ const checkAllForms = async () => {
   color: #333;
 }
 
+.ai-context-banner.email {
+  background-color: #fef3c7;
+  border-top-color: #fde68a;
+}
+
+.ai-context-banner.email .ai-context-line {
+  background-color: #d97706;
+}
+
+.ai-context-banner.email .ai-context-name {
+  color: #b45309;
+}
+
 /* ===== AI message markdown ===== */
 .ai-message-markdown {
   line-height: 1.7;
@@ -1093,6 +1108,12 @@ const checkAllForms = async () => {
   background-color: #eef0ff;
   padding: 2px 7px;
   border-radius: 10px;
+}
+
+/* 邮件待办 tag 用琥珀色区分 */
+.meta-tag.email {
+  background-color: #fef3c7;
+  color: #b45309;
 }
 
 .meta-time {

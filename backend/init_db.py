@@ -115,24 +115,39 @@ db.commit()
 # 4. 模拟邮件数据（张三 user_id=1）
 email1_sent_at = datetime.utcnow()
 emails = [
+    # ===== 收件箱（folder=inbox）=====
     Email(user_id=1, subject="关于Q3季度考核的通知", sender="hr@company.com", sender_dept="人力资源部",
           recipients="技术部|产品部|设计部",
           content="各位同事好，Q3季度考核将于7月25日开始，请各部门负责人在7月20日前完成自评表格填写。考核标准：1. 业绩达成率 2. 团队协作 3. 创新贡献。请按时完成。",
-          is_reply=False, sent_at=email1_sent_at),
+          is_reply=False, sent_at=email1_sent_at, folder="inbox", body_type="text"),
     Email(user_id=1, subject="接口文档评审会议邀请", sender="pm@company.com", sender_dept="产品部",
           recipients="技术部",
           content="技术部同事，接口文档评审会议定于7月16日下午3点召开，请技术部提前准备好接口测试报告和性能数据，7月15日前发送到我邮箱。",
-          is_reply=False, sent_at=datetime.utcnow()),
+          is_reply=False, sent_at=datetime.utcnow(), folder="inbox", body_type="text"),
     Email(user_id=1, subject="关于团队建设的通知", sender="admin@company.com", sender_dept="行政部",
           recipients="技术部|产品部|设计部",
           content="本周五下午团队建设活动，请大家穿休闲装，下午2点在大厅集合。",
-          is_reply=False, sent_at=datetime.utcnow()),
+          is_reply=False, sent_at=datetime.utcnow(), folder="inbox", body_type="text"),
     Email(user_id=1, subject="Re: 关于Q3季度考核的通知", sender="tech@company.com", sender_dept="技术部",
           content="收到，我们会按时完成自评。",
-          is_reply=True, reply_to_email_id=1, sent_at=datetime.utcnow()),
+          is_reply=True, reply_to_email_id=1, sent_at=datetime.utcnow(), folder="inbox", body_type="text"),
     Email(user_id=1, subject="Re: 关于Q3季度考核的通知", sender="design@company.com", sender_dept="设计部",
           content="设计部已收到通知，将按时提交。",
-          is_reply=True, reply_to_email_id=1, sent_at=datetime.utcnow()),
+          is_reply=True, reply_to_email_id=1, sent_at=datetime.utcnow(), folder="inbox", body_type="text"),
+    Email(user_id=1, subject="项目周报 - 第29周", sender="pm@company.com", sender_dept="产品部",
+          recipients="技术部",
+          content="# 第29周项目周报\n\n## 本周进展\n- 完成需求评审 3 项\n- 修复线上缺陷 5 个\n\n## 下周计划\n- 启动 v2.0 接口设计\n- 完成 QA 联调\n\n详见附件。",
+          is_reply=False, sent_at=datetime.utcnow(), folder="inbox", body_type="markdown",
+          attachment_file_ids=str(1)),  # 附加 项目计划.md
+    # ===== 已发送（folder=sent）=====
+    Email(user_id=1, subject="周报提交 - 张三", sender="张三 <zhangsan@company.com>", sender_dept="技术部",
+          recipients="李四 <lisi@company.com>",
+          content="李四你好，本周周报已整理完毕，详见附件，请查收。",
+          is_reply=False, sent_at=datetime.utcnow(), folder="sent", body_type="text"),
+    Email(user_id=1, subject="回复：接口文档评审", sender="张三 <zhangsan@company.com>", sender_dept="技术部",
+          recipients="pm@company.com",
+          content="收到，接口测试报告我会在7月15日前发到您邮箱。",
+          is_reply=False, sent_at=datetime.utcnow(), folder="sent", body_type="text"),
 ]
 db.add_all(emails)
 db.commit()

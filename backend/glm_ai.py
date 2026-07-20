@@ -971,6 +971,136 @@ def extract_email_todo(email_content):
     }
 
 
+def detect_email_candidate_todos(emails_batch, user_name):
+    """邮件候选待办检测（批量）。
+
+    批量分析邮件，找出需要用户处理的事项（候选待办）。
+    需用户确认后才会转为正式邮件待办。
+
+    优先使用 AI 检测；若 AI 未配置或调用失败，则使用规则匹配作为 fallback。
+
+    Args:
+        emails_batch: 邮件列表，每项为 dict { id, subject, sender, content }
+        user_name: 当前用户名
+
+    Returns:
+        list[dict]: 候选待办列表，每项 { id, content, deadline }
+    """
+    if not emails_batch:
+        return []
+
+    # ---- 优先尝试 AI 检测 ----
+    if API_KEY:
+        lines = []
+        for i, e in enumerate(emails_batch):
+            content_snippet = (e["content"] or "")[:300]
+            lines.append(f"{i+1}. [主题:{e['subject']}] [发件人:{e['sender']}]: {content_snippet}")
+        emails_text = "\n".join(lines)
+
+        prompt = f"""请分析以下邮件，找出所有需要用户「{user_name}」处理或跟进的事项。
+
+邮件列表：
+{emails_text}
+
+判断标准：
+- 邮件要求收件人执行的动作（如提交材料、参加会议、回复确认、填写表单等）
+- 有明确截止时间的事项
+- 需要用户回复或确认的事项
+- 不包括：纯通知型邮件、闲聊、已回复的邮件
+
+请以 JSON 格式返回，严格包含以下字段：
+- candidates: 候选待办列表（对象数组，每项包含：
+  - email_index: 对应邮件的序号（从1开始）
+  - content: 待办事项描述（简洁明确，包含关键动作和时间节点）
+  - deadline: 截止日期 YYYY-MM-DD 格式（如果有提到则提取，否则返回 null））
+
+如果没有需要处理的事项，返回空数组。
+
+只返回 JSON，不要任何额外文字。"""
+        try:
+            result = _ai_call(prompt, expect_json=True)
+            candidates_raw = result.get("candidates", [])
+            candidates = []
+            for c in candidates_raw:
+                idx = c.get("email_index", 0) - 1
+                if 0 <= idx < len(emails_batch):
+                    candidates.append({
+                        "id": emails_batch[idx]["id"],
+                        "content": c.get("content", ""),
+                        "deadline": c.get("deadline"),
+                    })
+            if candidates:
+                return candidates
+        except Exception:
+            pass  # AI 失败，降级到规则匹配
+
+    # ---- 规则匹配 fallback ----
+    candidates = []
+    todo_keywords = ["请", "需要", "要求", "提交", "回复", "确认", "参加", "填写", "完成", "截止", "之前", "之前提交"]
+    for e in emails_batch:
+        content = (e.get("content") or "")
+        if any(kw in content for kw in todo_keywords):
+            snippet = content[:80] + ("..." if len(content) > 80 else "")
+            candidates.append({
+                "id": e["id"],
+                "content": f"[{e.get('subject', '')}] {snippet}",
+                "deadline": None,
+            })
+    return candidates
+
+
+def generate_email_summary(email_content, attachments_text=""):
+    """生成邮件摘要。
+
+    对邮件正文（可带附件）生成结构化摘要，返回 Markdown 文本。
+
+    Args:
+        email_content: 邮件正文文本。
+        attachments_text: 附件内容的拼接文本（可选），格式如 "[附件1: xxx.md]\n内容..."
+
+    Returns:
+        str: Markdown 格式的邮件摘要
+    """
+    attachment_section = ""
+    if attachments_text and attachments_text.strip():
+        attachment_section = f"""
+
+【附件内容】
+{attachments_text[:6000]}
+"""
+
+    prompt = f"""请阅读以下邮件（含附件内容，如有），生成结构化摘要。
+
+【邮件正文】
+{email_content}{attachment_section}
+
+请以 Markdown 格式输出，严格包含以下小节（没有的内容写"无"，不要编造）：
+
+## 邮件主题
+（一句话概括邮件主旨）
+
+## 发件人 / 部门
+（若原文给出则提取，否则写"无"）
+
+## 核心内容
+（2-3 句话概括邮件正文要点）
+
+## 关键时间节点
+（用列表形式列出截止日期、会议时间等，格式 YYYY-MM-DD；无则写"无"）
+
+## 涉及人员 / 部门
+（列出邮件中提到的相关人或部门；无则写"无"）
+
+## 需要执行的事项
+（用列表形式列出需要收件人采取的行动项，按优先级排序；无则写"无"）
+
+## 附件要点
+（如有附件，简要概括附件核心内容；无附件则写"无"）
+
+只输出 Markdown 摘要，不要附加任何解释性文字。"""
+    return _ai_call(prompt, expect_json=False)
+
+
 def generate_file_summary(file_content):
     """文件摘要生成。
 

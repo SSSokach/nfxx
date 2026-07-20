@@ -75,7 +75,11 @@ export const todosApi = {
 }
 
 export const emailsApi = {
-  getList: (userId) => api.get(`/emails/list/${userId}`),
+  getList: (userId, folder) => api.get(`/emails/list/${userId}${folder ? `?folder=${folder}` : ''}`),
+  getDetail: (emailId) => api.get(`/emails/detail/${emailId}`),
+  send: (userId, { to, subject, content, body_type = 'markdown', attachment_file_ids = [] }) =>
+    api.post(`/emails/send/${userId}`, { to, subject, content, body_type, attachment_file_ids }, { timeout: 30000 }),
+  addToTodo: (userId, emailId) => api.post(`/emails/add-to-todo/${userId}/${emailId}`),
   scan: (userId) => api.post(`/emails/scan/${userId}`, {}, { timeout: 120000 }),
   getTodos: (userId) => api.get(`/emails/todos/${userId}`),
   updateTodo: (todoId, action) => api.put(`/emails/todos/${todoId}?action=${action}`),

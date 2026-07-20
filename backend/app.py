@@ -37,6 +37,34 @@ app.include_router(online_forms.router, prefix="/api/online-forms", tags=["onlin
 import models
 models.Base.metadata.create_all(bind=engine)
 
+# ===== 轻量级数据库迁移：为已存在的表补充新增列 =====
+def _run_lightweight_migration():
+    """对已存在的表执行 ALTER TABLE ADD COLUMN，补齐新增字段。
+    SQLite 支持 ADD COLUMN，但不支持 IF NOT EXISTS，故先检查列是否存在。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    migrations = [
+        # (table, column, column_ddl)
+        ("emails", "folder", "folder VARCHAR DEFAULT 'inbox'"),
+        ("emails", "body_type", "body_type VARCHAR DEFAULT 'text'"),
+        ("emails", "attachment_file_ids", "attachment_file_ids TEXT DEFAULT ''"),
+        ("candidate_todo", "source_email_id", "source_email_id INTEGER"),
+    ]
+    with engine.begin() as conn:
+        for table, column, ddl in migrations:
+            if not insp.has_table(table):
+                continue
+            existing_cols = {c["name"] for c in insp.get_columns(table)}
+            if column not in existing_cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+
+try:
+    _run_lightweight_migration()
+except Exception as _e:
+    # 迁移失败不阻塞启动，已存在的列会抛错被忽略
+    print(f"[migration] skipped: {_e}")
+
 frontend_dist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 if os.path.exists(frontend_dist_path):
     app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="static")
