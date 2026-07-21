@@ -126,9 +126,6 @@
       <div class="context-menu-item" @click="handleForward">
         <span class="menu-icon">➡️</span><span>转发</span>
       </div>
-      <div class="context-menu-item" @click="handleFavorite">
-        <span class="menu-icon">⭐</span><span>收藏</span>
-      </div>
       <div class="context-menu-item" @click="handleAiChat">
         <span class="menu-icon">🤖</span><span>AI对话</span>
       </div>
@@ -268,7 +265,7 @@
 
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue';
-import { chatsApi, filesApi, favoritesApi, todosApi, aiApi } from '../api';
+import { chatsApi, filesApi, todosApi, aiApi } from '../api';
 import { marked } from 'marked';
 
 const props = defineProps({
@@ -456,7 +453,14 @@ const renderMarkdown = (content) => {
 
 const showContextMenu = (event, message) => {
   if (multiSelectMode.value) return;
-  contextMenu.value = { visible: true, x: event.clientX, y: event.clientY, message: message };
+  let y = event.clientY;
+  // For the last message, the menu would overflow the bottom bar — shift it up so its bottom sits at the cursor.
+  const isLast = messages.value.length > 0 && message.id === messages.value[messages.value.length - 1].id;
+  if (isLast) {
+    y = event.clientY - 240;
+    if (y < 8) y = 8;
+  }
+  contextMenu.value = { visible: true, x: event.clientX, y, message: message };
 };
 
 const closeContextMenu = () => {
@@ -513,16 +517,6 @@ const doForward = async (contact) => {
     showToast(`已转发给 ${contact.name}`);
   }
   emit('message-sent');
-};
-
-const handleFavorite = async () => {
-  const msg = contextMenu.value.message;
-  if (!msg) return;
-  try {
-    await favoritesApi.add(props.currentUserId, msg.id);
-    showToast('已收藏');
-  } catch (e) { showToast('收藏失败'); }
-  closeContextMenu();
 };
 
 const handleAiChat = () => {
