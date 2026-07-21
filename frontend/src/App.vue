@@ -30,6 +30,8 @@
               :current-user-id="currentUserId"
               :context-message="aiContextMessage"
               :todo-refresh-key="todoRefreshKey"
+              :width="aiPanelWidth"
+              @resize="handleAiPanelResize"
               @jump-to-message="handleJumpToMessage"
               @jump-to-email="handleJumpToEmail"
               @close="aiPanelVisible = false"
@@ -101,6 +103,25 @@ const aiContextMessage = ref(null)
 const todoRefreshKey = ref(0)
 const aiPanelVisible = ref(false)
 const highlightMessageId = ref(null)
+
+// ===== AI Panel width (user-resizable, persisted) =====
+const AI_PANEL_MIN_WIDTH = 280
+const AI_PANEL_MAX_WIDTH = 720
+const AI_PANEL_DEFAULT_WIDTH = 360
+const AI_PANEL_WIDTH_KEY = 'aiPanelWidth'
+const readStoredWidth = () => {
+  if (typeof window === 'undefined') return AI_PANEL_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(AI_PANEL_WIDTH_KEY)
+  const n = raw ? parseInt(raw, 10) : NaN
+  if (isNaN(n)) return AI_PANEL_DEFAULT_WIDTH
+  return Math.max(AI_PANEL_MIN_WIDTH, Math.min(AI_PANEL_MAX_WIDTH, n))
+}
+const aiPanelWidth = ref(readStoredWidth())
+const handleAiPanelResize = (width) => {
+  const clamped = Math.max(AI_PANEL_MIN_WIDTH, Math.min(AI_PANEL_MAX_WIDTH, width))
+  aiPanelWidth.value = clamped
+  try { window.localStorage.setItem(AI_PANEL_WIDTH_KEY, String(clamped)) } catch {}
+}
 
 // ===== Floating AI button: draggable + edge-hide =====
 const aiFabRef = ref(null)

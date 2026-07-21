@@ -1,5 +1,13 @@
 <template>
-  <div class="ai-panel">
+  <div class="ai-panel" :style="{ width: width + 'px' }">
+    <!-- Draggable resizer on the left edge -->
+    <div
+      class="ai-panel-resizer"
+      :class="{ dragging: isResizing }"
+      @mousedown.stop.prevent="onResizerMouseDown"
+      @dblclick="onResizerDoubleClick"
+      title="拖动调整宽度 · 双击恢复默认"
+    ><span class="ai-panel-resizer-handle"></span></div>
     <!-- Header -->
     <div class="ai-header">
       <div class="ai-header-top">
@@ -264,7 +272,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue'
 import { aiApi, todosApi, emailsApi, formsApi, chatsApi, onlineFormsApi } from '../api'
 import OnlineFormModal from './OnlineFormModal.vue'
 import { marked } from 'marked'
@@ -274,10 +282,51 @@ marked.setOptions({ breaks: true })
 const props = defineProps({
   currentUserId: Number,
   contextMessage: { type: Object, default: null },
-  todoRefreshKey: { type: Number, default: 0 }
+  todoRefreshKey: { type: Number, default: 0 },
+  width: { type: Number, default: 360 }
 })
 
-const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close'])
+const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close', 'resize'])
+
+// ===== Resizable width =====
+const AI_PANEL_MIN_WIDTH = 280
+const AI_PANEL_MAX_WIDTH = 720
+const AI_PANEL_DEFAULT_WIDTH = 360
+const isResizing = ref(false)
+const resizeState = ref({ startX: 0, startWidth: 0 })
+
+const onResizerMouseDown = (e) => {
+  if (e.button !== 0) return
+  isResizing.value = true
+  resizeState.value = { startX: e.clientX, startWidth: props.width }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onResizerMouseMove)
+  document.addEventListener('mouseup', onResizerMouseUp)
+}
+const onResizerMouseMove = (e) => {
+  // Panel is on the right edge; dragging left increases width
+  const dx = resizeState.value.startX - e.clientX
+  const next = resizeState.value.startWidth + dx
+  const clamped = Math.max(AI_PANEL_MIN_WIDTH, Math.min(AI_PANEL_MAX_WIDTH, next))
+  emit('resize', clamped)
+}
+const onResizerMouseUp = () => {
+  isResizing.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  document.removeEventListener('mousemove', onResizerMouseMove)
+  document.removeEventListener('mouseup', onResizerMouseUp)
+}
+const onResizerDoubleClick = () => {
+  emit('resize', AI_PANEL_DEFAULT_WIDTH)
+}
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onResizerMouseMove)
+  document.removeEventListener('mouseup', onResizerMouseUp)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+})
 
 // ===== Tab management =====
 const activeTab = ref('chat')
