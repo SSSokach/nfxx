@@ -31,13 +31,14 @@
             :current-user-id="currentUserId"
             :refresh-key="emailRefreshKey"
             :view-mode="viewMode"
-            :external-selected-id="externalSelectedEmailId"
+            :jump-to-email-id="jumpToEmailId"
             @user-change="handleUserChange"
             @email-select="handleEmailSelect"
             @compose-trigger="handleComposeTrigger"
             @ai-chat="handleAiChat"
             @todo-created="handleTodoCreated"
             @view-change="handleViewChange"
+            @jump-completed="handleJumpCompleted"
           />
           <div ref="emailDetailWrapRef" class="chat-area-wrap">
             <EmailDetail
@@ -108,6 +109,7 @@ const aiContextMessage = ref(null)
 const todoRefreshKey = ref(0)
 const aiPanelVisible = ref(false)
 const highlightMessageId = ref(null)
+const jumpToEmailId = ref(null)
 
 // ===== Floating AI button: draggable + edge-hide =====
 const aiFabRef = ref(null)
@@ -259,7 +261,6 @@ const viewMode = ref('messages')
 const selectedEmail = ref(null)
 const selectedEmailDetail = ref(null)
 const composeMode = ref(false)
-const externalSelectedEmailId = ref(null)  // 外部触发选中的邮件 ID（如待办跳转）
 
 const handleUserChange = (userId) => {
   currentUserId.value = userId
@@ -363,24 +364,20 @@ const handleJumpToMessage = async ({ contact_id, message_id }) => {
 }
 
 const handleJumpToEmail = async ({ email_id }) => {
-  // 关闭 AI 面板，切换到邮件视图
-  aiPanelVisible.value = false
-  if (viewMode.value !== 'emails') {
-    viewMode.value = 'emails'
-  }
-  // 加载对应邮件详情
+  if (!email_id) return
+  // 切换到邮箱视图并清空旧选中状态
+  viewMode.value = 'emails'
+  selectedContact.value = null
+  selectedEmail.value = null
+  selectedEmailDetail.value = null
   composeMode.value = false
-  try {
-    const res = await emailsApi.getDetail(email_id)
-    selectedEmailDetail.value = res.data
-    selectedEmail.value = res.data
-    // 通知 EmailList 选中该邮件（触发 watch 加载列表并高亮）
-    externalSelectedEmailId.value = email_id
-    // 重置以便下次相同 ID 也能触发
-    setTimeout(() => { externalSelectedEmailId.value = null }, 500)
-  } catch (e) {
-    selectedEmailDetail.value = null
-  }
+  // 等待 EmailList 挂载后再设置目标 id，确保 watch 能触发
+  await nextTick()
+  jumpToEmailId.value = email_id
+}
+
+const handleJumpCompleted = () => {
+  jumpToEmailId.value = null
 }
 
 const handleScrollToMessage = (msgId) => {

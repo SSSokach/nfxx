@@ -266,18 +266,6 @@
       </div>
     </div>
 
-    <!-- Email Preview Modal -->
-    <div class="email-preview-overlay" v-if="emailPreview" @click.self="emailPreview = null">
-      <div class="email-preview-card">
-        <div class="email-preview-header">
-          <div class="email-preview-subject">{{ emailPreview.subject }}</div>
-          <button class="email-preview-close" @click="emailPreview = null">×</button>
-        </div>
-        <div class="email-preview-sender" v-if="emailPreview.sender">发件人：{{ emailPreview.sender }}</div>
-        <div class="email-preview-body">{{ emailPreview.content }}</div>
-      </div>
-    </div>
-
     <!-- Online Form Modal -->
     <OnlineFormModal
       :visible="onlineFormVisible"
@@ -578,10 +566,7 @@ const mergedTodos = computed(() => {
     completed_at: t.completed_at,
     source_type: 'email',
     source_name: t.subject || '',
-    email_id: t.source_id,
-    email_subject: t.subject,
-    email_sender: t.sender,
-    email_content: t.content
+    email_id: t.source_id
   }))
   // 当前列表数据已按同一 status 拉取，仅按 created_at 倒序排列
   return [...chatItems, ...emailItems].sort((a, b) => {
@@ -638,18 +623,12 @@ const deleteTodo = async (todo) => {
 }
 
 // ===== Todo click → jump to message/email =====
-const emailPreview = ref(null)
-
 const handleTodoClick = (todo) => {
   if (todo.status !== 'pending') return
   if (todo.type === 'chat' && todo.contact_id && todo.message_id) {
     emit('jump-to-message', { contact_id: todo.contact_id, message_id: todo.message_id })
-  } else if (todo.type === 'email') {
-    // 跳转到对应邮件（携带 email_id，由 App.vue 切换视图并加载邮件详情）
-    const emailId = todo.source_id || todo.email_id
-    if (emailId) {
-      emit('jump-to-email', { email_id: Number(emailId) })
-    }
+  } else if (todo.type === 'email' && todo.email_id) {
+    emit('jump-to-email', { email_id: todo.email_id })
   }
 }
 
@@ -1694,67 +1673,4 @@ const checkAllForms = async () => {
 .todo-item.clickable:hover .todo-jump-hint {
   opacity: 1;
 }
-
-/* ===== Email preview modal ===== */
-.email-preview-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  animation: fadeIn 0.2s ease;
-}
-.email-preview-card {
-  background: #fff;
-  border-radius: 12px;
-  max-width: 560px;
-  width: 90%;
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.email-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-}
-.email-preview-subject {
-  font-size: 16px;
-  font-weight: 600;
-  color: #111827;
-}
-.email-preview-close {
-  background: none;
-  border: none;
-  font-size: 24px;
-  color: #9ca3af;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0 4px;
-  transition: color 0.2s;
-}
-.email-preview-close:hover { color: #ef4444; }
-.email-preview-sender {
-  padding: 8px 20px;
-  font-size: 13px;
-  color: #6b7280;
-  border-bottom: 1px solid #f3f4f6;
-}
-.email-preview-body {
-  padding: 16px 20px;
-  font-size: 14px;
-  color: #374151;
-  line-height: 1.7;
-  overflow-y: auto;
-  white-space: pre-wrap;
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 </style>

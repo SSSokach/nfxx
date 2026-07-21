@@ -114,13 +114,13 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { usersApi, emailsApi } from '../api'
 
-const emit = defineEmits(['user-change', 'email-select', 'compose-trigger', 'ai-chat', 'todo-created', 'view-change'])
+const emit = defineEmits(['user-change', 'email-select', 'compose-trigger', 'ai-chat', 'todo-created', 'view-change', 'jump-completed'])
 
 const props = defineProps({
   currentUserId: { type: Number, default: 1 },
   refreshKey: { type: Number, default: 0 },
   viewMode: { type: String, default: 'emails' },
-  externalSelectedId: { type: Number, default: null }
+  jumpToEmailId: { type: [Number, String], default: null }
 })
 
 const users = ref([])
@@ -131,6 +131,7 @@ const activeFolder = ref('inbox')
 const selectedEmailId = ref(null)
 const contextMenu = ref({ visible: false, x: 0, y: 0, email: null })
 const toast = ref({ visible: false, message: '' })
+const isJumping = ref(false)
 
 const folders = [
   { key: 'inbox', label: '收件箱', icon: '📥' },
@@ -158,6 +159,8 @@ const loadEmails = async () => {
   try {
     const res = await emailsApi.getList(currentUserId.value, activeFolder.value)
     emails.value = res.data || []
+    // 跳转过程中不自动选中，由 jumpToEmail 统一处理
+    if (isJumping.value) return
     // 自动选第一封
     if (emails.value.length > 0 && activeFolder.value !== 'compose') {
       if (!selectedEmailId.value || !emails.value.find(e => e.id === selectedEmailId.value)) {
@@ -169,9 +172,39 @@ const loadEmails = async () => {
     }
   } catch (e) {
     showToast('加载邮件失败')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
+
+// ===== 从待办跳转到对应邮件 =====
+const jumpToEmail = async (id) => {
+  const targetId = String(id)
+  isJumping.value = true
+  try {
+    // 依次在 inbox、sent 文件夹中查找
+    for (const f of ['inbox', 'sent']) {
+      if (activeFolder.value !== f) {
+        activeFolder.value = f
+      }
+      await loadEmails()
+      const found = emails.value.find(e => String(e.id) === targetId)
+      if (found) {
+        selectEmail(found)
+        return
+      }
+    }
+    showToast('未找到对应邮件')
+  } finally {
+    isJumping.value = false
+  }
+}
+
+watch(() => props.jumpToEmailId, async (newId) => {
+  if (!newId) return
+  await jumpToEmail(newId)
+  emit('jump-completed')
+})
 
 const switchFolder = (folder) => {
   activeFolder.value = folder
@@ -280,24 +313,6 @@ onMounted(() => {
 watch(() => props.currentUserId, (v) => { currentUserId.value = v })
 watch(() => props.refreshKey, () => {
   if (activeFolder.value !== 'compose') loadEmails()
-})
-
-// 外部选中邮件 ID 变化时（如从待办跳转），自动选中并加载该邮件
-watch(() => props.externalSelectedId, async (newId) => {
-  if (newId == null) return
-  // 确保在收件箱或已发送视图（非写邮件）
-  if (activeFolder.value === 'compose') {
-    activeFolder.value = 'inbox'
-  }
-  await loadEmails()
-  // 在列表中查找该邮件并选中
-  const target = emails.value.find(e => e.id === newId)
-  if (target) {
-    selectEmail(target)
-  } else {
-    // 列表中没有，直接通知父组件选中（详情已由父组件加载）
-    selectedEmailId.value = newId
-  }
 })
 </script>
 
