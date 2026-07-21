@@ -563,11 +563,10 @@ const handleTodoClick = (todo) => {
   if (todo.type === 'chat' && todo.contact_id && todo.message_id) {
     emit('jump-to-message', { contact_id: todo.contact_id, message_id: todo.message_id })
   } else if (todo.type === 'email') {
-    // 显示邮件预览弹窗
-    emailPreview.value = {
-      subject: todo.email_subject || todo.source_name,
-      sender: todo.email_sender || '',
-      content: todo.email_content || todo.content
+    // 跳转到对应邮件（携带 email_id，由 App.vue 切换视图并加载邮件详情）
+    const emailId = todo.source_id || todo.email_id
+    if (emailId) {
+      emit('jump-to-email', { email_id: Number(emailId) })
     }
   }
 }

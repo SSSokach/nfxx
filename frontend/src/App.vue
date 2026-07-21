@@ -23,38 +23,6 @@
               @scroll-to-message="handleScrollToMessage"
             />
           </div>
-          <!-- AI Panel as slide-in drawer -->
-          <transition name="slide-ai">
-            <AIPanel
-              v-show="aiPanelVisible"
-              :current-user-id="currentUserId"
-              :context-message="aiContextMessage"
-              :todo-refresh-key="todoRefreshKey"
-              @jump-to-message="handleJumpToMessage"
-              @jump-to-email="handleJumpToEmail"
-              @close="aiPanelVisible = false"
-            />
-          </transition>
-          <!-- Floating AI button when panel hidden (draggable + edge-hide) -->
-          <div
-            v-if="!aiPanelVisible"
-            ref="aiFabRef"
-            class="ai-fab"
-            :class="{ 'edge-hidden': isEdgeHidden, 'dragging': isDragging }"
-            :style="fabStyle"
-            @mousedown="onFabMouseDown"
-          >
-            <div class="ai-fab-pulse" v-if="!isDragging && !isEdgeHidden"></div>
-            <svg class="ai-fab-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="currentColor"/>
-              <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.6"/>
-              <circle cx="5" cy="19" r="1" fill="currentColor" opacity="0.4"/>
-            </svg>
-            <span class="ai-fab-label" v-if="!isEdgeHidden">AI</span>
-            <div class="ai-fab-edge-hint" v-if="isEdgeHidden">
-              <span>点</span><span>击</span>
-            </div>
-          </div>
         </template>
 
         <!-- 邮箱视图 -->
@@ -63,6 +31,7 @@
             :current-user-id="currentUserId"
             :refresh-key="emailRefreshKey"
             :view-mode="viewMode"
+            :external-selected-id="externalSelectedEmailId"
             @user-change="handleUserChange"
             @email-select="handleEmailSelect"
             @compose-trigger="handleComposeTrigger"
@@ -70,14 +39,49 @@
             @todo-created="handleTodoCreated"
             @view-change="handleViewChange"
           />
-          <EmailDetail
-            :email="selectedEmailDetail"
-            :compose-mode="composeMode"
-            :current-user-id="currentUserId"
-            @compose-cancel="handleComposeCancel"
-            @email-sent="handleEmailSent"
-          />
+          <div ref="emailDetailWrapRef" class="chat-area-wrap">
+            <EmailDetail
+              :email="selectedEmailDetail"
+              :compose-mode="composeMode"
+              :current-user-id="currentUserId"
+              @compose-cancel="handleComposeCancel"
+              @email-sent="handleEmailSent"
+            />
+          </div>
         </template>
+
+        <!-- AI Panel（独立于视图，切换视图不影响） -->
+        <transition name="slide-ai">
+          <AIPanel
+            v-show="aiPanelVisible"
+            :current-user-id="currentUserId"
+            :context-message="aiContextMessage"
+            :todo-refresh-key="todoRefreshKey"
+            @jump-to-message="handleJumpToMessage"
+            @jump-to-email="handleJumpToEmail"
+            @close="aiPanelVisible = false"
+          />
+        </transition>
+        <!-- Floating AI button when panel hidden (draggable + edge-hide) -->
+        <div
+          v-if="!aiPanelVisible"
+          ref="aiFabRef"
+          class="ai-fab"
+          :class="{ 'edge-hidden': isEdgeHidden, 'dragging': isDragging }"
+          :style="fabStyle"
+          @mousedown="onFabMouseDown"
+        >
+          <div class="ai-fab-pulse" v-if="!isDragging && !isEdgeHidden"></div>
+          <svg class="ai-fab-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="currentColor"/>
+            <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.6"/>
+            <circle cx="5" cy="19" r="1" fill="currentColor" opacity="0.4"/>
+          </svg>
+          <span class="ai-fab-label" v-if="!isEdgeHidden">AI</span>
+          <div class="ai-fab-edge-hint" v-if="isEdgeHidden">
+            <span>点</span><span>击</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -105,6 +109,7 @@ const highlightMessageId = ref(null)
 // ===== Floating AI button: draggable + edge-hide =====
 const aiFabRef = ref(null)
 const chatAreaWrapRef = ref(null)
+const emailDetailWrapRef = ref(null)
 const fabPos = ref({ x: typeof window !== 'undefined' ? window.innerWidth - 96 : 800, y: typeof window !== 'undefined' ? window.innerHeight - 96 : 600 })
 const isDragging = ref(false)
 const isEdgeHidden = ref(false)
@@ -114,10 +119,13 @@ const FAB_SIZE = 64
 const EDGE_THRESHOLD = 50      // 距离边框小于此值视为贴边
 const EDGE_HIDE_OFFSET = 36     // 贴边隐藏时露出的宽度
 
-// 获取聊天框边界
+// 获取内容区域边界（消息视图用聊天框，邮件视图用邮件详情区）
 const getChatBounds = () => {
   if (chatAreaWrapRef.value) {
     return chatAreaWrapRef.value.getBoundingClientRect()
+  }
+  if (emailDetailWrapRef.value) {
+    return emailDetailWrapRef.value.getBoundingClientRect()
   }
   // fallback: 整个窗口
   return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight }
@@ -262,6 +270,7 @@ const viewMode = ref('messages')
 const selectedEmail = ref(null)
 const selectedEmailDetail = ref(null)
 const composeMode = ref(false)
+const externalSelectedEmailId = ref(null)  // 外部触发选中的邮件 ID（如待办跳转）
 
 const handleUserChange = (userId) => {
   currentUserId.value = userId
@@ -364,8 +373,25 @@ const handleJumpToMessage = async ({ contact_id, message_id }) => {
   highlightMessageId.value = message_id
 }
 
-const handleJumpToEmail = () => {
-  // Email preview is handled inside AIPanel itself
+const handleJumpToEmail = async ({ email_id }) => {
+  // 关闭 AI 面板，切换到邮件视图
+  aiPanelVisible.value = false
+  if (viewMode.value !== 'emails') {
+    viewMode.value = 'emails'
+  }
+  // 加载对应邮件详情
+  composeMode.value = false
+  try {
+    const res = await emailsApi.getDetail(email_id)
+    selectedEmailDetail.value = res.data
+    selectedEmail.value = res.data
+    // 通知 EmailList 选中该邮件（触发 watch 加载列表并高亮）
+    externalSelectedEmailId.value = email_id
+    // 重置以便下次相同 ID 也能触发
+    setTimeout(() => { externalSelectedEmailId.value = null }, 500)
+  } catch (e) {
+    selectedEmailDetail.value = null
+  }
 }
 
 const handleScrollToMessage = (msgId) => {

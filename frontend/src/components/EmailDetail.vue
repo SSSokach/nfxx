@@ -19,7 +19,29 @@
       <div class="compose-form">
         <div class="compose-field">
           <label>收件人</label>
-          <input type="text" v-model="form.to" placeholder="例如：李四 <lisi@company.com>" />
+          <div class="recipient-picker">
+            <input
+              type="text"
+              v-model="form.to"
+              placeholder="点击下拉选择或手动输入"
+              @focus="showRecipientDropdown = true"
+              @blur="hideRecipientDropdown"
+              @input="filterRecipients"
+            />
+            <button type="button" class="recipient-toggle" @click="showRecipientDropdown = !showRecipientDropdown">▼</button>
+            <div class="recipient-dropdown" v-if="showRecipientDropdown && filteredRecipients.length">
+              <div
+                v-for="user in filteredRecipients"
+                :key="user.id"
+                class="recipient-option"
+                @mousedown.prevent="selectRecipient(user)"
+              >
+                <span class="recipient-name">{{ user.name }}</span>
+                <span class="recipient-email">{{ user.email || user.name + '@company.com' }}</span>
+              </div>
+              <div v-if="filteredRecipients.length === 0" class="recipient-empty">无匹配联系人</div>
+            </div>
+          </div>
         </div>
         <div class="compose-field">
           <label>主题</label>
@@ -165,7 +187,7 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { emailsApi, filesApi } from '../api'
+import { emailsApi, filesApi, usersApi } from '../api'
 import { marked } from 'marked'
 
 marked.setOptions({ breaks: true })
@@ -191,6 +213,46 @@ const fileList = ref([])
 const showFilePicker = ref(false)
 const previewAttachmentData = ref(null)
 const toast = ref({ visible: false, message: '' })
+
+// ===== 收件人下拉选择 =====
+const userList = ref([])
+const showRecipientDropdown = ref(false)
+const recipientFilter = ref('')
+const filteredRecipients = computed(() => {
+  const keyword = (recipientFilter.value || form.value.to || '').trim().toLowerCase()
+  const candidates = userList.value.filter(u => u.id !== props.currentUserId)
+  if (!keyword) return candidates
+  return candidates.filter(u =>
+    (u.name || '').toLowerCase().includes(keyword) ||
+    (u.email || '').toLowerCase().includes(keyword)
+  )
+})
+
+const loadUserList = async () => {
+  try {
+    const res = await usersApi.getAll()
+    userList.value = (res.data || res).filter(u => u.id !== props.currentUserId)
+  } catch (e) {
+    userList.value = []
+  }
+}
+
+const selectRecipient = (user) => {
+  const email = user.email || `${user.name}@company.com`
+  form.value.to = `${user.name} <${email}>`
+  showRecipientDropdown.value = false
+  recipientFilter.value = ''
+}
+
+const filterRecipients = () => {
+  recipientFilter.value = form.value.to
+  showRecipientDropdown.value = true
+}
+
+const hideRecipientDropdown = () => {
+  // 延迟关闭，让 mousedown 选择能先触发
+  setTimeout(() => { showRecipientDropdown.value = false }, 200)
+}
 
 const selectedAttachments = computed(() =>
   fileList.value.filter(f => form.value.attachment_file_ids.includes(f.id))
@@ -295,6 +357,7 @@ const forwardEmail = () => {
 watch(() => props.composeMode, (v) => {
   if (v) {
     loadFileList()
+    loadUserList()
     if (!form.value.subject && !form.value.to && !form.value.content) {
       // 新邮件，不预填
     }
@@ -395,6 +458,73 @@ watch(() => showFilePicker.value, (v) => {
 .compose-field input[type="text"]:focus {
   border-color: #4d7fff;
   box-shadow: 0 0 0 4px rgba(77, 127, 255, 0.12);
+}
+
+/* ===== 收件人下拉选择 ===== */
+.recipient-picker {
+  position: relative;
+}
+.recipient-picker input {
+  width: 100%;
+  padding-right: 36px !important;
+}
+.recipient-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 4px;
+}
+.recipient-toggle:hover {
+  color: #4d7fff;
+}
+.recipient-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid rgba(210, 220, 235, 1);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+.recipient-option {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(240, 242, 245, 1);
+  transition: background 0.15s ease;
+}
+.recipient-option:last-child {
+  border-bottom: none;
+}
+.recipient-option:hover {
+  background: rgba(77, 127, 255, 0.06);
+}
+.recipient-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2937;
+}
+.recipient-email {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.recipient-empty {
+  padding: 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .body-type-row {

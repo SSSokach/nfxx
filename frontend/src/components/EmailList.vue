@@ -119,7 +119,8 @@ const emit = defineEmits(['user-change', 'email-select', 'compose-trigger', 'ai-
 const props = defineProps({
   currentUserId: { type: Number, default: 1 },
   refreshKey: { type: Number, default: 0 },
-  viewMode: { type: String, default: 'emails' }
+  viewMode: { type: String, default: 'emails' },
+  externalSelectedId: { type: Number, default: null }
 })
 
 const users = ref([])
@@ -279,6 +280,24 @@ onMounted(() => {
 watch(() => props.currentUserId, (v) => { currentUserId.value = v })
 watch(() => props.refreshKey, () => {
   if (activeFolder.value !== 'compose') loadEmails()
+})
+
+// 外部选中邮件 ID 变化时（如从待办跳转），自动选中并加载该邮件
+watch(() => props.externalSelectedId, async (newId) => {
+  if (newId == null) return
+  // 确保在收件箱或已发送视图（非写邮件）
+  if (activeFolder.value === 'compose') {
+    activeFolder.value = 'inbox'
+  }
+  await loadEmails()
+  // 在列表中查找该邮件并选中
+  const target = emails.value.find(e => e.id === newId)
+  if (target) {
+    selectEmail(target)
+  } else {
+    // 列表中没有，直接通知父组件选中（详情已由父组件加载）
+    selectedEmailId.value = newId
+  }
 })
 </script>
 
