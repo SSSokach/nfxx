@@ -13,6 +13,7 @@
           />
           <div class="chat-area-wrap">
             <ChatArea
+              ref="chatAreaRef"
               :selected-contact="selectedContact"
               :current-user-id="currentUserId"
               :current-user="currentUser"
@@ -62,6 +63,7 @@
             @resize="handleAiPanelResize"
             @jump-to-message="handleJumpToMessage"
             @jump-to-email="handleJumpToEmail"
+            @message-sent="handleAiMessageSent"
             @close="aiPanelVisible = false"
           />
         </transition>
@@ -92,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import ContactList from './components/ContactList.vue'
 import ChatArea from './components/ChatArea.vue'
 import EmailList from './components/EmailList.vue'
@@ -123,6 +125,26 @@ const dragState = ref({ startX: 0, startY: 0, originX: 0, originY: 0, moved: fal
 const FAB_SIZE = 64
 const EDGE_THRESHOLD = 50      // 距离边框小于此值视为贴边
 const EDGE_HIDE_OFFSET = 36     // 贴边隐藏时露出的宽度
+
+// 浮动按钮的位置样式（计算属性）
+const fabStyle = computed(() => {
+  const { x, y } = fabPos.value
+  const pos = { left: `${x}px`, top: `${y}px` }
+  if (isEdgeHidden.value) {
+    // 贴边隐藏时只露出一小部分
+    const b = getChatBounds()
+    const distLeft = x - b.left
+    const distRight = b.right - FAB_SIZE - x
+    const distTop = y - b.top
+    const distBottom = b.bottom - FAB_SIZE - y
+    const minDist = Math.min(distLeft, distRight, distTop, distBottom)
+    if (distLeft === minDist) return { left: `${b.left - FAB_SIZE + EDGE_HIDE_OFFSET}px`, top: `${y}px` }
+    if (distRight === minDist) return { left: `${b.right - EDGE_HIDE_OFFSET}px`, top: `${y}px` }
+    if (distTop === minDist) return { left: `${x}px`, top: `${b.top - FAB_SIZE + EDGE_HIDE_OFFSET}px` }
+    return { left: `${x}px`, top: `${b.bottom - EDGE_HIDE_OFFSET}px` }
+  }
+  return pos
+})
 
 // 获取内容区域边界（消息视图用聊天框，邮件视图用邮件详情区）
 const getChatBounds = () => {
@@ -276,6 +298,17 @@ const handleContactSelect = (contact) => {
 }
 
 const handleMessageSent = () => {
+  refreshKey.value++
+}
+
+// AI 面板触发的消息发送（如催办）→ 刷新对应会话的消息列表
+const chatAreaRef = ref(null)
+const handleAiMessageSent = ({ contact_id }) => {
+  // 如果当前正在查看的就是被催办的会话，立即刷新消息列表
+  if (selectedContact.value && selectedContact.value.id === contact_id && chatAreaRef.value) {
+    chatAreaRef.value.loadMessages()
+  }
+  // 联系人列表的最后一条消息也需要刷新
   refreshKey.value++
 }
 
@@ -469,5 +502,67 @@ body { font-family: -apple-system, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft Ya
   font-weight: 700;
   letter-spacing: 0.5px;
   line-height: 1;
+}
+
+/* ===== 浮动 AI 按钮（可拖拽 + 贴边隐藏） ===== */
+.ai-fab {
+  position: fixed;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.45), 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 999;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.ai-fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 28px rgba(102, 126, 234, 0.6), 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+.ai-fab:active {
+  transform: scale(0.95);
+}
+.ai-fab-svg {
+  width: 26px;
+  height: 26px;
+}
+.ai-fab-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.ai-fab-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(102, 126, 234, 0.4);
+  animation: aiFabPulse 2s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes aiFabPulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+.ai-fab-edge-hint {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #667eea;
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.6);
+  animation: aiFabBlink 1.5s ease-in-out infinite;
+}
+@keyframes aiFabBlink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 </style>

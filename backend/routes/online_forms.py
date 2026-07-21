@@ -567,6 +567,137 @@ def delete_form(form_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ============ AI 总结填写情况 ============
+
+@router.post("/{form_id}/ai-summary")
+def ai_summary_form(form_id: int, db: Session = Depends(get_db)):
+    """AI 总结表格填写情况。
+
+    返回结构化总结：
+    - 整体进度
+    - 未填写人名单
+    - 部分填写人及其缺失列
+    - 已填写人的完成度
+    - 建议
+    """
+    form = db.query(OnlineForm).filter(OnlineForm.id == form_id).first()
+    if not form:
+        raise HTTPException(404, "表格不存在")
+
+    tracker = db.query(FormTracker).filter(
+        FormTracker.online_form_id == form_id
+    ).first()
+
+    columns = json.loads(form.columns) if form.columns else []
+    required = form.required_members.split(",") if form.required_members else []
+
+    # 获取所有行数据
+    rows = db.query(OnlineFormRow).filter(
+        OnlineFormRow.form_id == form_id
+    ).all()
+
+    # 构造每人每列的填写矩阵
+    member_data = {}
+    for r in rows:
+        row_data = json.loads(r.data) if r.data else {}
+        member_data[r.member_name] = {
+            "filled": r.filled,
+            "filled_at": r.filled_at.isoformat() if r.filled_at else None,
+            "data": row_data,
+        }
+
+    # 可编辑列（排除姓名列）
+    editable_cols = [c for c in columns if c.get("type") != "name"]
+
+    # 详细分析每人填写情况 —— 始终逐列检查，不依赖 filled 字段
+    detail_lines = []
+    truly_filled_count = 0  # 真正所有列都填了的人数
+    for name in required:
+        info = member_data.get(name)
+        if not info:
+            detail_lines.append(f"- {name}：❌ 尚未开始填写（无任何数据）")
+            continue
+        # 逐列检查每个可编辑列是否有值
+        filled_cols = []
+        unfilled_cols = []
+        for col in editable_cols:
+            val = info["data"].get(col["key"], "")
+            if val and str(val).strip():
+                filled_cols.append(col["label"])
+            else:
+                unfilled_cols.append(col["label"])
+        if not unfilled_cols:
+            # 所有可编辑列都有值 —— 真正完成
+            truly_filled_count += 1
+            filled_time = info['filled_at'][:10] if info['filled_at'] else '时间未知'
+            detail_lines.append(f"- {name}：✅ 已完成全部 {len(editable_cols)} 列填写（{filled_time}）")
+        elif filled_cols:
+            # 部分填写
+            detail_lines.append(
+                f"- {name}：⏳ 部分填写（已填 {len(filled_cols)}/{len(editable_cols)} 列：{', '.join(filled_cols)}；"
+                f"未填：{', '.join(unfilled_cols)}）"
+            )
+        else:
+            # 有行数据但所有可编辑列都空着
+            detail_lines.append(f"- {name}：❌ 已创建行但尚未填写任何内容")
+
+    total = len(required)
+    unfilled_count = total - truly_filled_count
+    percent = round(truly_filled_count / total * 100, 1) if total else 0
+
+    deadline_str = form.deadline.isoformat() if form.deadline else "无截止日期"
+    col_labels = [c["label"] for c in columns if c.get("type") != "name"]
+
+    # 构造 AI prompt
+    prompt = f"""你是办公助手的AI分析模块。请根据以下在线表格的填写数据，生成一份简洁的填写情况总结报告。
+
+表格标题：{form.title}
+截止日期：{deadline_str}
+表格列（共{len(editable_cols)}列）：{', '.join(col_labels)}
+应填写人数：{total} 人
+已全部填写完的人数：{truly_filled_count} 人
+未完成填写的人数：{unfilled_count} 人
+完成率：{percent}%
+
+各人填写详情：
+{chr(10).join(detail_lines)}
+
+请生成总结报告，要求：
+1. 用简明扼要的语言概括整体进度（完成率、多少人完成、多少人未完成）
+2. 重点列出"部分填写"的人员，明确说明他们已填了哪些列、还缺哪些列未填
+3. 列出完全未填写的人员
+4. 给出 1-2 条跟进建议（如重点催办谁、关注哪些缺失列、截止日期提醒等）
+5. 语气专业、简洁，用中文，总字数控制在 250 字以内
+"""
+
+    try:
+        import glm_ai
+        summary = glm_ai._ai_call(prompt, expect_json=False)
+    except Exception as e:
+        # AI 调用失败时返回结构化兜底
+        summary = (
+            f"📊 {form.title} 填写情况：\n"
+            f"完成率 {percent}%（{filled_count}/{total}）\n"
+            f"未填写 {unfilled_count} 人\n\n"
+            + "\n".join(detail_lines)
+        )
+
+    return {
+        "ok": True,
+        "form_id": form_id,
+        "title": form.title,
+        "summary": summary,
+        "stats": {
+            "total": total,
+            "filled": truly_filled_count,
+            "unfilled": unfilled_count,
+            "percent": percent,
+            "deadline": deadline_str,
+        },
+        "details": detail_lines,
+    }
+
+
 # ============ 催办：向群聊发送 @未填写人 消息 ============
 
 @router.post("/{form_id}/remind")

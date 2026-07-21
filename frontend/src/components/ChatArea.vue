@@ -884,7 +884,7 @@ const previewExcelByName = async (fileName) => {
   }
 };
 
-defineExpose({ previewExcelByName });
+defineExpose({ previewExcelByName, loadMessages });
 
 // Scroll to highlighted message and auto-clear after 3s
 watch(() => props.highlightMessageId, async (msgId) => {

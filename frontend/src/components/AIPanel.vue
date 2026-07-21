@@ -272,6 +272,7 @@
             <div class="form-tracker-actions">
               <button class="form-btn small" @click="checkTracker(t)">检测</button>
               <button class="form-btn small info" v-if="t.type === 'online_form'" @click="openOnlineFormFiller(t.source_id)">查看/填写表格</button>
+              <button class="form-btn small ai" v-if="t.type === 'online_form'" @click="aiSummaryTracker(t)">🤖 AI总结</button>
               <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0">@催办</button>
               <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
             </div>
@@ -297,6 +298,46 @@
       @close="formFillerVisible = false"
       @refresh="loadUnifiedTrackers"
     />
+
+    <!-- AI Summary Modal -->
+    <div class="ai-summary-overlay" v-if="aiSummaryVisible" @click.self="aiSummaryVisible = false">
+      <div class="ai-summary-modal">
+        <div class="ai-summary-header">
+          <h3>🤖 AI 填写情况总结</h3>
+          <button class="ai-summary-close" @click="aiSummaryVisible = false">×</button>
+        </div>
+        <div class="ai-summary-body">
+          <div v-if="aiSummaryLoading" class="ai-summary-loading">
+            <div class="loading-spinner"></div>
+            <span>AI 正在分析填写情况...</span>
+          </div>
+          <template v-else-if="aiSummaryData">
+            <!-- 统计概览 -->
+            <div class="summary-stats" v-if="aiSummaryData.stats">
+              <div class="stat-item">
+                <span class="stat-num">{{ aiSummaryData.stats.percent }}%</span>
+                <span class="stat-label">完成率</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-num">{{ aiSummaryData.stats.filled }}/{{ aiSummaryData.stats.total }}</span>
+                <span class="stat-label">已填/总数</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-num">{{ aiSummaryData.stats.unfilled }}</span>
+                <span class="stat-label">未填写</span>
+              </div>
+            </div>
+            <!-- AI 总结文本 -->
+            <div class="summary-text" v-html="renderMarkdown(aiSummaryData.summary)"></div>
+            <!-- 详细明细 -->
+            <div class="summary-details" v-if="aiSummaryData.details && aiSummaryData.details.length">
+              <div class="details-title">📋 逐人明细</div>
+              <div v-for="(line, i) in aiSummaryData.details" :key="i" class="detail-line">{{ line }}</div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -316,7 +357,7 @@ const props = defineProps({
   width: { type: Number, default: 360 }
 })
 
-const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close', 'resize'])
+const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close', 'resize', 'message-sent'])
 
 // ===== Resizable width =====
 const AI_PANEL_MIN_WIDTH = 280
@@ -732,6 +773,10 @@ const showFormCreator = ref(false)
 const formFillerVisible = ref(false)
 const formFillerId = ref(null)
 const groupChatsForCreator = ref([])
+// AI 总结弹窗
+const aiSummaryVisible = ref(false)
+const aiSummaryLoading = ref(false)
+const aiSummaryData = ref(null)
 const groupMembersForCreator = ref([])
 
 const typeLabel = (type) => ({
@@ -817,15 +862,32 @@ const remindTracker = async (t) => {
     if (t.type === 'online_form') {
       const res = await onlineFormsApi.remind(t.source_id)
       alert(res.data.message + '\n\n发送内容：\n' + (res.data.sent_content || ''))
+      // 通知父组件刷新对应会话的消息列表
+      emit('message-sent', { contact_id: t.contact_id })
     } else {
       const { formsApi } = await import('../api')
       const res = await formsApi.remind(t.tracker_id)
       alert(res.data.message)
+      emit('message-sent', { contact_id: t.contact_id })
     }
     await loadUnifiedTrackers()
   } catch (e) {
     alert('催办失败: ' + (e.response?.data?.detail || e.message))
   }
+}
+
+const aiSummaryTracker = async (t) => {
+  aiSummaryVisible.value = true
+  aiSummaryLoading.value = true
+  aiSummaryData.value = null
+  try {
+    const res = await onlineFormsApi.aiSummary(t.source_id)
+    aiSummaryData.value = res.data
+  } catch (e) {
+    alert('AI 总结失败: ' + (e.response?.data?.detail || e.message))
+    aiSummaryVisible.value = false
+  }
+  aiSummaryLoading.value = false
 }
 
 const deleteTracker = async (t) => {
@@ -1771,5 +1833,74 @@ const checkAllTrackers = async () => {
 }
 .todo-item.clickable:hover .todo-jump-hint {
   opacity: 1;
+}
+
+/* AI 总结按钮 */
+.form-btn.small.ai {
+  background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+  border-color: #a5b4fc;
+  color: #4338ca;
+}
+.form-btn.small.ai:hover {
+  background: linear-gradient(135deg, #c7d2fe, #a5b4fc);
+}
+
+/* AI 总结弹窗 */
+.ai-summary-overlay {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.ai-summary-modal {
+  background: #fff; border-radius: 16px; width: 90%; max-width: 520px; max-height: 80vh;
+  display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.ai-summary-header {
+  padding: 16px 20px; border-bottom: 1px solid #eee;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.ai-summary-header h3 { margin: 0; font-size: 16px; }
+.ai-summary-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #999; }
+.ai-summary-body { padding: 18px 20px; overflow-y: auto; flex: 1; }
+.ai-summary-loading {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 40px 0; color: #667eea; font-size: 13px;
+}
+.loading-spinner {
+  width: 36px; height: 36px;
+  border: 3px solid #e0e7ff; border-top-color: #667eea;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.summary-stats {
+  display: flex; gap: 12px; margin-bottom: 16px;
+}
+.stat-item {
+  flex: 1; text-align: center;
+  background: #f8faff; border: 1px solid #e2e8f5; border-radius: 10px;
+  padding: 10px 6px;
+}
+.stat-num {
+  display: block; font-size: 20px; font-weight: 700; color: #4338ca;
+}
+.stat-label {
+  font-size: 11px; color: #888; margin-top: 2px; display: block;
+}
+.summary-text {
+  background: #f8faff; border-radius: 10px; padding: 14px;
+  font-size: 13px; line-height: 1.7; color: #333;
+}
+.summary-text :deep(p) { margin: 0 0 6px; }
+.summary-text :deep(p:last-child) { margin-bottom: 0; }
+.summary-details {
+  margin-top: 14px;
+}
+.details-title {
+  font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px;
+}
+.detail-line {
+  font-size: 12px; color: #666; line-height: 1.8;
+  padding: 2px 0;
 }
 </style>

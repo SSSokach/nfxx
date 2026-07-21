@@ -137,6 +137,7 @@ export const onlineFormsApi = {
   close: (formId) => api.post(`/online-forms/${formId}/close`),
   delete: (formId) => api.delete(`/online-forms/${formId}`),
   remind: (formId) => api.post(`/online-forms/${formId}/remind`),
+  aiSummary: (formId) => api.post(`/online-forms/${formId}/ai-summary`),
   updateColumns: (formId, columns) => api.put(`/online-forms/${formId}/columns`, { columns }),
   addMembers: (formId, members) => api.post(`/online-forms/${formId}/add-members`, { members }),
   trackers: (userId) => api.get(`/online-forms/trackers/${userId}`),
