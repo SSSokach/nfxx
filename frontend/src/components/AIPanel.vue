@@ -39,7 +39,20 @@
             class="ai-message"
             :class="msg.role"
           >
-            <template v-if="msg.role === 'user'">{{ msg.content }}</template>
+            <template v-if="msg.role === 'user'">
+              <div
+                v-if="msg.context"
+                class="ai-message-quote"
+                :class="{ email: msg.context.source_type === 'email' }"
+              >
+                <div class="ai-message-quote-line"></div>
+                <div class="ai-message-quote-body">
+                  <span class="ai-message-quote-name">{{ msg.context.sender_name }}</span>
+                  <span class="ai-message-quote-text">: {{ msg.context.content.substring(0, 80) }}{{ msg.context.content.length > 80 ? '...' : '' }}</span>
+                </div>
+              </div>
+              <div class="ai-message-text">{{ msg.content }}</div>
+            </template>
             <template v-else>
               <div class="ai-message-markdown" v-html="renderMarkdown(msg.content)"></div>
             </template>
@@ -376,6 +389,9 @@ const sendAiMessage = async (overrideMsg) => {
 
   hasUserSentMessage.value = true
 
+  // 快照引用上下文，便于在消息列表中展示
+  const contextSnapshot = localContext.value ? { ...localContext.value } : null
+
   let prompt = userMsg
   if (localContext.value) {
     const ctx = localContext.value
@@ -383,7 +399,7 @@ const sendAiMessage = async (overrideMsg) => {
     prompt = `${sourceLabel}内容来自${ctx.sender_name}：「${ctx.content}」\n用户问题：${userMsg}`
   }
 
-  aiMessages.value.push({ role: 'user', content: userMsg })
+  aiMessages.value.push({ role: 'user', content: userMsg, context: contextSnapshot })
   aiInput.value = ''
   aiLoading.value = true
   scrollToBottom()
@@ -929,6 +945,49 @@ const checkAllForms = async () => {
   border: none;
   border-top: 1px solid #e5e7eb;
   margin: 12px 0;
+}
+
+/* ===== Inline quote inside user message bubble ===== */
+.ai-message-quote {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-message-quote.email {
+  background-color: rgba(254, 243, 199, 0.92);
+  color: #92400e;
+}
+
+.ai-message-quote-line {
+  width: 3px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.ai-message-quote.email .ai-message-quote-line {
+  background-color: #d97706;
+}
+
+.ai-message-quote-body {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ai-message-quote-name {
+  font-weight: 600;
+}
+
+.ai-message-text {
+  white-space: pre-wrap;
 }
 
 /* ===== Header actions ===== */

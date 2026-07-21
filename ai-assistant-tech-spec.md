@@ -4,7 +4,7 @@
 >
 > 版本: v3.1 | 日期: 2026-07-20
 
----
+***
 
 ## 项目概述
 
@@ -12,7 +12,7 @@
 
 > 聊天软件基座的技术选型、项目结构、数据库设计、API 设计、AI 工具注册框架、前端设计等，请参见 **[AI 办公助手 Demo](./ai-office-assistant-demo.md)**。
 
----
+***
 
 ## 1. 项目背景与目标
 
@@ -30,7 +30,7 @@
 在聊天基座之上，通过**侧边栏 AI 助手面板**提供简洁的办公辅助能力。侧边栏仅保留 **AI对话** 和 **待办** 两个 Tab：
 
 - **AI对话**：统一的自然语言交互入口，文件摘要、工作报告等功能通过对话完成（如"@文件名 总结一下"、"帮我生成本周工作报告"）。初始状态下输入栏上方纵向排列快捷提示气泡，点击自动填充指令；用户发送首条消息后气泡自动隐藏。提供"新对话"按钮，点击后清空聊天记录并重新展示提示气泡。
-- **待办**：合并消息待办与邮件待办，统一展示待办列表。待办创建不再依赖主动扫描，而是在收到消息时于**对应消息下方**内联弹出"是否创建待办：[待办内容摘要]"气泡。
+- **待办**：合并消息待办与邮件待办，统一展示待办列表。待办创建不再依赖主动扫描，而是在收到消息时于**对应消息下方**内联弹出"是否创建待办：\[待办内容摘要]"气泡。
 - **智能回复**：移入中间聊天列，输入框旁设置智能回复按钮，用户点击后才生成智能回复候选列表（纵向排列），点击候选项填充到输入框。
 
 > 设计原则：**能通过 AI 对话完成的功能不再单独开页面**，保持右侧栏简约。
@@ -42,9 +42,9 @@
 
 ### 1.4 信息分类总览
 
-| | 群聊消息 | 文件（WPS 云文档等） | 邮件 |
-|--|---------|-------------------|------|
-| **自己发出的** | 工作总结（周报月报） | 回填检测（谁未填写） | 回复追踪（已回复/未回复部门） |
+| <br />    | 群聊消息         | 文件（WPS 云文档等）         | 邮件     |
+| --------- | ------------ | -------------------- | ------ |
+| **自己发出的** | -            | 回填检测（谁未填写）           | -      |
 | **自己收到的** | 摘要（可转为待办）；待办 | 文件摘要，文档问答（金额、规则、考核等） | 邮件待办管理 |
 
 ## 2. 功能需求详细说明
@@ -55,13 +55,13 @@
 
 **快捷提示气泡**：初始状态下，输入栏上方**纵向排列**展示若干提示气泡，点击后自动填充指令到输入框（不自动发送，用户可修改后发送）：
 
-| 气泡 | 填充指令 | 说明 |
-|------|---------|------|
-| 📄 总结文件内容 | `请帮我总结文件内容` | 替代原文件摘要 Tab |
+| 气泡        | 填充指令               | 说明          |
+| --------- | ------------------ | ----------- |
+| 📄 总结文件内容 | `请帮我总结文件内容`        | 替代原文件摘要 Tab |
 | 📊 生成工作报告 | `帮我总结一下我本周的主要工作内容` | 替代原工作报告 Tab |
-| 📋 查看待办列表 | `查看我的待办列表` | 快速查看待办 |
-| 👥 查看联系人 | `查看联系人列表` | — |
-| 💬 查看最近消息 | `查看最近消息` | — |
+| 📋 查看待办列表 | `查看我的待办列表`         | 快速查看待办      |
+| 👥 查看联系人  | `查看联系人列表`          | —           |
+| 💬 查看最近消息 | `查看最近消息`           | —           |
 
 **气泡显示规则**：
 
@@ -77,8 +77,8 @@
 
 **待办创建方式**：不依赖主动扫描，而是在**收到消息时**于对应消息下方内联弹出气泡提示：
 
-- 收到对方消息后，在该条消息的下方弹出："是否创建待办：[待办内容摘要]" + [创建] / [忽略] 按钮
-- 示例：消息内容为"麻烦评审一下我们项目组的交付物吧。" → 下方弹出"是否创建待办：评审**的项目组交付物"
+- 收到对方消息后，在该条消息的下方弹出："是否创建待办：\[待办内容摘要]" + \[创建] / \[忽略] 按钮
+- 示例：消息内容为"麻烦评审一下我们项目组的交付物吧。" → 下方弹出"是否创建待办：评审\*\*的项目组交付物"
 - 点击"创建"→ 调用 `POST /api/todos/create-from-message/{user_id}/{message_id}` 创建待办，气泡消失
 - 点击"忽略"→ 关闭该条消息的气泡
 - 邮件待办同理（收到邮件时弹出创建提示）
@@ -88,7 +88,7 @@
 - 每条待办显示：内容、来源类型标签（群聊/私聊/邮件）、来源名称、截止日期、状态
 - 待办状态管理：完成（删除线样式）、删除
 - 超期标红：截止日期已过且未完成的任务自动标红
-- 消息唯一性：每条消息（source_id）只会生成一个待办
+- 消息唯一性：每条消息（source\_id）只会生成一个待办
 
 ### 2.3 智能回复（聊天区域）
 
@@ -103,6 +103,7 @@
 ### 2.4 文件摘要（通过 AI 对话完成）
 
 用户在 AI 对话中通过自然语言完成文件摘要，例如：
+
 - "请帮我总结文件内容"
 - "@项目计划.md 总结一下这个文件的主要内容"
 
@@ -111,6 +112,7 @@
 ### 2.5 工作报告生成（通过 AI 对话完成）
 
 用户在 AI 对话中通过自然语言完成工作报告，例如：
+
 - "帮我总结一下我本周的主要工作内容"
 
 大模型基于已完成待办自动汇总生成 Markdown 格式工作报告，以对话形式返回。
@@ -151,38 +153,38 @@
 
 **Email 表新增列：**
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| folder | String | `inbox` / `sent` / `draft`，默认 `inbox` |
-| body_type | String | `markdown` / `text`，默认 `markdown` |
-| attachment_file_ids | String | 附件 File ID 列表，逗号分隔 |
+| 字段                    | 类型     | 说明                                    |
+| --------------------- | ------ | ------------------------------------- |
+| folder                | String | `inbox` / `sent` / `draft`，默认 `inbox` |
+| body\_type            | String | `markdown` / `text`，默认 `markdown`     |
+| attachment\_file\_ids | String | 附件 File ID 列表，逗号分隔                    |
 
 **CandidateTodo 表新增列：**
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| source_email_id | Integer | 来源邮件 ID（消息候选为空） |
-| source_type | String | `message` / `email`，默认 `message` |
+| 字段                | 类型      | 说明                               |
+| ----------------- | ------- | -------------------------------- |
+| source\_email\_id | Integer | 来源邮件 ID（消息候选为空）                  |
+| source\_type      | String  | `message` / `email`，默认 `message` |
 
 **新增表 ScannedEmail（邮件扫描去重）：**
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Integer PK | 主键 |
-| user_id | Integer | 用户 ID |
-| email_id | Integer | 邮件 ID |
-| scanned_at | Datetime | 扫描时间 |
+| 字段          | 类型         | 说明    |
+| ----------- | ---------- | ----- |
+| id          | Integer PK | 主键    |
+| user\_id    | Integer    | 用户 ID |
+| email\_id   | Integer    | 邮件 ID |
+| scanned\_at | Datetime   | 扫描时间  |
 
 #### 2.8.4 关键 API
 
-| 接口 | 说明 |
-|------|------|
-| `GET /api/emails/list/{user_id}?folder=inbox\|sent\|draft` | 获取邮件列表（按文件夹过滤） |
-| `GET /api/emails/detail/{email_id}` | 获取邮件详情（含附件内容） |
-| `POST /api/emails/send/{user_id}` | 发送新邮件（body: `{to, subject, content, body_type, attachment_file_ids}`） |
-| `POST /api/emails/add-to-todo/{user_id}/{email_id}` | 将邮件直接加入待办（不经候选阶段） |
-| `POST /api/todos/scan-candidates/{user_id}` | 同时扫描消息+邮件，生成候选待办 |
-| `POST /api/todos/candidates/{candidate_id}/confirm` | 确认候选（邮件→EmailTodoItem，消息→ChatTodoItem） |
+| 接口                                                         | 说明                                                                    |
+| ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/emails/list/{user_id}?folder=inbox\|sent\|draft` | 获取邮件列表（按文件夹过滤）                                                        |
+| `GET /api/emails/detail/{email_id}`                        | 获取邮件详情（含附件内容）                                                         |
+| `POST /api/emails/send/{user_id}`                          | 发送新邮件（body: `{to, subject, content, body_type, attachment_file_ids}`） |
+| `POST /api/emails/add-to-todo/{user_id}/{email_id}`        | 将邮件直接加入待办（不经候选阶段）                                                     |
+| `POST /api/todos/scan-candidates/{user_id}`                | 同时扫描消息+邮件，生成候选待办                                                      |
+| `POST /api/todos/candidates/{candidate_id}/confirm`        | 确认候选（邮件→EmailTodoItem，消息→ChatTodoItem）                                |
 
 #### 2.8.5 AI skill：邮件摘要
 
@@ -190,19 +192,19 @@
 
 - **触发关键词**：`邮件摘要`、`总结邮件`、`总结这封邮件`、`邮件总结`
 - **触发正则**：`/邮件摘要|总结.{0,4}邮件/`
-- **system_prompt**：引导大模型对引用邮件的正文与附件内容生成结构化摘要（核心事项、关键时间、需跟进的待办、风险提示），并以 Markdown 输出。
+- **system\_prompt**：引导大模型对引用邮件的正文与附件内容生成结构化摘要（核心事项、关键时间、需跟进的待办、风险提示），并以 Markdown 输出。
 - **调用方式**：邮件列表右键 → AI对话 → 在右侧 AI 面板输入「总结这封邮件」即可触发。
 
 ## 3. 优先级与迭代计划
 
-| 优先级 | 功能模块 | 说明 |
-|-------|---------|------|
-| P0 | AI 对话统一入口 | 快捷提示气泡 + 文件摘要/工作报告通过对话完成 |
-| P0 | 待办合并 | 消息+邮件待办统一列表 + 气泡式创建 + 完成/删除/超期标红 |
-| P0 | 智能回复气泡 | 聊天区域输入栏上方弹出智能回复气泡（目前占位文本） |
-| P0 | 邮箱页面 | 视图切换 + 收件箱/已发送/写邮件 + 右键 AI对话/加入待办 + 待办 tag 区分 |
-| P1 | 邮件回复追踪 | 自动检测已回复/未回复部门并汇总（后续通过 AI 对话查询） |
-| P1 | 文件回填检测 | 定时检测云文档填写状态，依赖 WPS API 和定时任务 |
+| 优先级 | 功能模块      | 说明                                            |
+| --- | --------- | --------------------------------------------- |
+| P0  | AI 对话统一入口 | 快捷提示气泡 + 文件摘要/工作报告通过对话完成                      |
+| P0  | 待办合并      | 消息+邮件待办统一列表 + 气泡式创建 + 完成/删除/超期标红              |
+| P0  | 智能回复气泡    | 聊天区域输入栏上方弹出智能回复气泡（目前占位文本）                     |
+| P0  | 邮箱页面      | 视图切换 + 收件箱/已发送/写邮件 + 右键 AI对话/加入待办 + 待办 tag 区分 |
+| P1  | 邮件回复追踪    | 自动检测已回复/未回复部门并汇总（后续通过 AI 对话查询）                |
+| P1  | 文件回填检测    | 定时检测云文档填写状态，依赖 WPS API 和定时任务                  |
 
 ## 4. 系统架构设计
 
@@ -242,120 +244,120 @@ graph TB
   - **待办 Tab**：消息待办 + 邮件待办合并展示，仅刷新按钮，无扫描按钮
 - **聊天区增强（ChatArea）**：
   - 输入框旁设置智能回复按钮（💡），点击后弹出纵向排列的候选回复列表
-  - 收到对方消息时，在**消息下方**内联弹出"是否创建待办：[内容摘要]"气泡（创建/忽略）
+  - 收到对方消息时，在**消息下方**内联弹出"是否创建待办：\[内容摘要]"气泡（创建/忽略）
 
 ### 4.3 技术选型
 
-| 组件 | 推荐方案 | 备选方案 |
-|------|---------|---------|
-| 后端框架 | Python (FastAPI) + SQLAlchemy | Java Spring Boot |
-| 前端框架 | Vue 3 + Vite + Axios + Marked | React + Ant Design |
-| 数据库 | SQLite (Demo) | PostgreSQL / MySQL (生产) |
-| 定时任务 | APScheduler / Celery Beat | Spring @Scheduled |
-| 大模型调用 | OpenAI 兼容 SDK（DeepSeek/Qwen） | HTTP 直接调用 API |
-| WPS 接入 | WPS 开放平台 API | - |
-| 邮件接入 | 公司邮件系统 API | IMAP/SMTP |
+| 组件     | 推荐方案                          | 备选方案                    |
+| ------ | ----------------------------- | ----------------------- |
+| 后端框架   | Python (FastAPI) + SQLAlchemy | Java Spring Boot        |
+| 前端框架   | Vue 3 + Vite + Axios + Marked | React + Ant Design      |
+| 数据库    | SQLite (Demo)                 | PostgreSQL / MySQL (生产) |
+| 定时任务   | APScheduler / Celery Beat     | Spring @Scheduled       |
+| 大模型调用  | OpenAI 兼容 SDK（DeepSeek/Qwen）  | HTTP 直接调用 API           |
+| WPS 接入 | WPS 开放平台 API                  | -                       |
+| 邮件接入   | 公司邮件系统 API                    | IMAP/SMTP               |
 
 ## 5. 数据模型设计（新增表）
 
-> 基座的 4 张表（users, groups, group_members, messages）保持不变，以下为功能扩展新增的 6 张表。
+> 基座的 4 张表（users, groups, group\_members, messages）保持不变，以下为功能扩展新增的 6 张表。
 
-### @所有人 消息摘要表 (chat_summary)
+### @所有人 消息摘要表 (chat\_summary)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| user_id | String | 用户标识（来自 IM 登录态） |
-| source_id | String | 原始消息 ID（用于跳转到原消息） |
-| group_name | String | 来源群组名称 |
-| content | Text | 消息摘要（大模型生成） |
-| original_message | Text | 原始消息内容 |
-| created_at | Datetime | 创建时间 |
+| 字段                | 类型       | 说明                |
+| ----------------- | -------- | ----------------- |
+| id                | UUID     | 主键                |
+| user\_id          | String   | 用户标识（来自 IM 登录态）   |
+| source\_id        | String   | 原始消息 ID（用于跳转到原消息） |
+| group\_name       | String   | 来源群组名称            |
+| content           | Text     | 消息摘要（大模型生成）       |
+| original\_message | Text     | 原始消息内容            |
+| created\_at       | Datetime | 创建时间              |
 
-### 群聊待办事项表 (chat_todo_item)
+### 群聊待办事项表 (chat\_todo\_item)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| user_id | String | 用户标识 |
-| source_id | String | 原始消息 ID |
-| group_name | String | 来源群组名称 |
-| content | Text | 待办内容摘要（大模型生成） |
-| deadline | Date | 截止日期 |
-| status | Enum | pending / completed / overdue |
-| completed_at | Datetime | 完成时间 |
-| created_at | Datetime | 创建时间 |
-| updated_at | Datetime | 更新时间 |
-| expire_at | Datetime | 自动清理时间 |
+| 字段            | 类型       | 说明                            |
+| ------------- | -------- | ----------------------------- |
+| id            | UUID     | 主键                            |
+| user\_id      | String   | 用户标识                          |
+| source\_id    | String   | 原始消息 ID                       |
+| group\_name   | String   | 来源群组名称                        |
+| content       | Text     | 待办内容摘要（大模型生成）                 |
+| deadline      | Date     | 截止日期                          |
+| status        | Enum     | pending / completed / overdue |
+| completed\_at | Datetime | 完成时间                          |
+| created\_at   | Datetime | 创建时间                          |
+| updated\_at   | Datetime | 更新时间                          |
+| expire\_at    | Datetime | 自动清理时间                        |
 
-### 邮件待办事项表 (email_todo_item)
+### 邮件待办事项表 (email\_todo\_item)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| user_id | String | 用户标识 |
-| source_id | String | 原始邮件 ID |
-| subject | String | 邮件主题 |
-| sender | String | 发件人 |
-| content | Text | 待办内容摘要 |
-| deadline | Date | 截止日期 |
-| status | Enum | pending / completed / overdue |
-| completed_at | Datetime | 完成时间 |
-| created_at | Datetime | 创建时间 |
-| updated_at | Datetime | 更新时间 |
-| expire_at | Datetime | 自动清理时间 |
+| 字段            | 类型       | 说明                            |
+| ------------- | -------- | ----------------------------- |
+| id            | UUID     | 主键                            |
+| user\_id      | String   | 用户标识                          |
+| source\_id    | String   | 原始邮件 ID                       |
+| subject       | String   | 邮件主题                          |
+| sender        | String   | 发件人                           |
+| content       | Text     | 待办内容摘要                        |
+| deadline      | Date     | 截止日期                          |
+| status        | Enum     | pending / completed / overdue |
+| completed\_at | Datetime | 完成时间                          |
+| created\_at   | Datetime | 创建时间                          |
+| updated\_at   | Datetime | 更新时间                          |
+| expire\_at    | Datetime | 自动清理时间                        |
 
-### 文件回填追踪表 (file_tracker)
+### 文件回填追踪表 (file\_tracker)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| user_id | String | 用户标识 |
-| file_url | String | WPS 云文档 URL |
-| file_name | String | 文件名称 |
-| status | Enum | tracking / completed / cancelled |
-| unfilled_users | String | 未填写人员列表，`\|` 分隔 |
-| last_checked_at | Datetime | 上次检测时间 |
-| check_interval_min | Int | 检测间隔（分钟），默认 60 |
-| created_at | Datetime | 创建时间 |
+| 字段                   | 类型       | 说明                               |
+| -------------------- | -------- | -------------------------------- |
+| id                   | UUID     | 主键                               |
+| user\_id             | String   | 用户标识                             |
+| file\_url            | String   | WPS 云文档 URL                      |
+| file\_name           | String   | 文件名称                             |
+| status               | Enum     | tracking / completed / cancelled |
+| unfilled\_users      | String   | 未填写人员列表，`\|` 分隔                  |
+| last\_checked\_at    | Datetime | 上次检测时间                           |
+| check\_interval\_min | Int      | 检测间隔（分钟），默认 60                   |
+| created\_at          | Datetime | 创建时间                             |
 
-### 邮件回复追踪表 (email_tracker)
+### 邮件回复追踪表 (email\_tracker)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| user_id | String | 用户标识 |
-| email_id | String | 原始邮件 ID |
-| subject | String | 邮件主题 |
-| sent_at | Datetime | 发出时间 |
-| replied_depts | String | 已回复部门，`\|` 分隔 |
-| unreplied_depts | String | 未回复部门列表，`\|` 分隔 |
-| status | Enum | tracking / completed / cancelled |
-| check_interval_hours | Int | 检测间隔（小时），默认 12 |
-| last_checked_at | Datetime | 上次检测时间 |
-| created_at | Datetime | 创建时间 |
+| 字段                     | 类型       | 说明                               |
+| ---------------------- | -------- | -------------------------------- |
+| id                     | UUID     | 主键                               |
+| user\_id               | String   | 用户标识                             |
+| email\_id              | String   | 原始邮件 ID                          |
+| subject                | String   | 邮件主题                             |
+| sent\_at               | Datetime | 发出时间                             |
+| replied\_depts         | String   | 已回复部门，`\|` 分隔                    |
+| unreplied\_depts       | String   | 未回复部门列表，`\|` 分隔                  |
+| status                 | Enum     | tracking / completed / cancelled |
+| check\_interval\_hours | Int      | 检测间隔（小时），默认 12                   |
+| last\_checked\_at      | Datetime | 上次检测时间                           |
+| created\_at            | Datetime | 创建时间                             |
 
-### 用户设置表 (user_settings)
+### 用户设置表 (user\_settings)
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| user_id | String | 主键 |
-| model_provider | Enum | deepseek / qwen |
-| file_check_interval_min | Int | 文件检测间隔，默认 60 |
-| email_check_interval_hours | Int | 邮件检测间隔，默认 12 |
-| updated_at | Datetime | 更新时间 |
+| 字段                            | 类型       | 说明              |
+| ----------------------------- | -------- | --------------- |
+| user\_id                      | String   | 主键              |
+| model\_provider               | Enum     | deepseek / qwen |
+| file\_check\_interval\_min    | Int      | 文件检测间隔，默认 60    |
+| email\_check\_interval\_hours | Int      | 邮件检测间隔，默认 12    |
+| updated\_at                   | Datetime | 更新时间            |
 
 ## 6. 调用逻辑与核心流程
 
 ### 6.1 大模型调用场景
 
-| 场景 | 输入 | 输出 | 调用频率 |
-|------|------|------|---------|
-| AI 对话 | 用户自然语言指令 | 工具调用 + 文本回复 | 用户触发 |
-| 文件摘要 | 文档文本内容 | 结构化摘要（金额、规则、考核部门等） | 用户在 AI 对话中触发 |
-| 工作报告生成 | 已完成待办列表 | Markdown 格式报告 | 用户在 AI 对话中触发 |
-| 回填状态判断 | 表格数据 | 人员列表 + 各自填写状态 | 定时任务（后续迭代） |
-| 邮件回复判断 | 邮件原文 | 是否需要回复 + 回复部门提取 | 定时任务（后续迭代） |
+| 场景     | 输入       | 输出                 | 调用频率         |
+| ------ | -------- | ------------------ | ------------ |
+| AI 对话  | 用户自然语言指令 | 工具调用 + 文本回复        | 用户触发         |
+| 文件摘要   | 文档文本内容   | 结构化摘要（金额、规则、考核部门等） | 用户在 AI 对话中触发 |
+| 工作报告生成 | 已完成待办列表  | Markdown 格式报告      | 用户在 AI 对话中触发 |
+| 回填状态判断 | 表格数据     | 人员列表 + 各自填写状态      | 定时任务（后续迭代）   |
+| 邮件回复判断 | 邮件原文     | 是否需要回复 + 回复部门提取    | 定时任务（后续迭代）   |
 
 ### 6.2 待办创建流程（消息下方内联气泡）
 
@@ -571,25 +573,25 @@ flowchart TD
 
 ## 9. 工作量评估
 
-| 模块 | 工作内容 | 预估工时 | 依赖 |
-|------|---------|---------|------|
-| **AI 对话统一入口** | 快捷提示气泡 + 文件摘要/工作报告通过 AI 对话完成 | 2-3 天 | 聊天基座 |
-| **待办合并** | 消息+邮件待办统一列表 + 气泡式创建接口 + 完成/删除/超期标红 | 3-4 天 | 基座 + 待办表 |
-| **智能回复气泡** | 聊天区域输入栏上方弹出智能回复气泡（占位文本） | 1-2 天 | 聊天基座 |
-| **客户端 UI** | 侧边栏精简为 2 Tab + 聊天区智能回复/待办气泡 | 3-4 天 | 无 |
-| **联调与测试** | 前后端联调 + Prompt 调优 + Bug 修复 | 2-3 天 | 所有模块 |
-| **邮件回复追踪（后续）** | 回复线程查询 + 大模型判断 + 部门提取 + 汇总展示 | 4-6 天 | 邮件 API |
-| **文件回填检测（后续）** | 表格解析 + 大模型兜底 + 定时任务 + 催办文本 | 4-6 天 | WPS API |
+| 模块             | 工作内容                               | 预估工时  | 依赖       |
+| -------------- | ---------------------------------- | ----- | -------- |
+| **AI 对话统一入口**  | 快捷提示气泡 + 文件摘要/工作报告通过 AI 对话完成       | 2-3 天 | 聊天基座     |
+| **待办合并**       | 消息+邮件待办统一列表 + 气泡式创建接口 + 完成/删除/超期标红 | 3-4 天 | 基座 + 待办表 |
+| **智能回复气泡**     | 聊天区域输入栏上方弹出智能回复气泡（占位文本）            | 1-2 天 | 聊天基座     |
+| **客户端 UI**     | 侧边栏精简为 2 Tab + 聊天区智能回复/待办气泡        | 3-4 天 | 无        |
+| **联调与测试**      | 前后端联调 + Prompt 调优 + Bug 修复         | 2-3 天 | 所有模块     |
+| **邮件回复追踪（后续）** | 回复线程查询 + 大模型判断 + 部门提取 + 汇总展示       | 4-6 天 | 邮件 API   |
+| **文件回填检测（后续）** | 表格解析 + 大模型兜底 + 定时任务 + 催办文本         | 4-6 天 | WPS API  |
 
 > **当前阶段总计**：约 11-16 人天。后续迭代（邮件追踪 + 文件回填）约 8-12 天。
 
 ### 关键里程碑
 
-| 里程碑 | 交付内容 | 预估时间 |
-|-------|---------|---------|
-| M1: 简约侧边栏 | AI对话 + 待办合并 + 智能回复气泡 | 第 1 周 |
-| M2: 联调测试 | 前后端联调 + Prompt 调优 | 第 2 周 |
-| M3: 后续迭代 | 邮件回复追踪 + 文件回填检测 | 第 3-4 周 |
+| 里程碑       | 交付内容                 | 预估时间    |
+| --------- | -------------------- | ------- |
+| M1: 简约侧边栏 | AI对话 + 待办合并 + 智能回复气泡 | 第 1 周   |
+| M2: 联调测试  | 前后端联调 + Prompt 调优    | 第 2 周   |
+| M3: 后续迭代  | 邮件回复追踪 + 文件回填检测      | 第 3-4 周 |
 
 ## 10. 具体实现步骤
 
@@ -604,14 +606,14 @@ flowchart TD
 
 1. ChatArea 移除"智能回复"右键菜单项
 2. 输入框旁新增智能回复按钮（💡），点击后弹出纵向排列候选列表（占位文本：智能回复1/2/3）
-3. 收到对方消息后，在**消息下方**内联弹出"是否创建待办：[内容摘要]"气泡（创建/忽略）
+3. 收到对方消息后，在**消息下方**内联弹出"是否创建待办：\[内容摘要]"气泡（创建/忽略）
 4. 后端新增 `POST /api/todos/create-from-message/{user_id}/{message_id}` 接口
 5. 点击智能回复候选项填充输入框，点击创建待办调用 API
 
 ### Step 3: App.vue 清理（第 1 周）
 
 1. 移除 smartReplyEvent 相关 props/events
-2. 移除 handleSmartReply 和 window.__useSmartReply 逻辑
+2. 移除 handleSmartReply 和 window.\_\_useSmartReply 逻辑
 
 ### Step 4: 联调与测试（第 2 周）
 
@@ -625,7 +627,7 @@ flowchart TD
 2. 文件回填检测：WPS API 对接 + 定时任务 + 催办文本
 3. 智能回复接入大模型（替换占位文本）
 
----
+***
 
 ## 11. v3.1 更新：Skills 意图路由 + AI 能力扩展（2026-07-20）
 
@@ -635,17 +637,17 @@ flowchart TD
 
 **9 个 Skill 定义**：
 
-| Skill 名称 | 功能 | 说明 |
-|-----------|------|------|
-| `file_summary` | 文件理解与摘要 | 调用 get_file_content/summarize_file，生成结构化摘要 |
-| `report_generation` | 报告生成 | **合并原 work_report + daily_digest**，按时间范围路由（日报→generate_daily_digest，周报/月报→generate_work_report） |
-| `smart_reply` | 智能回复建议 | 调用 smart_reply 工具生成多风格回复 |
-| `todo_management` | 待办管理 | 调用 prioritize_todos，支持超期标注、候选待办引导 |
-| `meeting_minutes` | 会议纪要提取 | 从群聊消息提取会议主题/参会人/决议/行动项 |
-| `communication_query` | 沟通信息查询 | 查询聊天记录/最近消息/联系人列表 |
-| `text_polish` ✨ | 文本润色与改写 | **新增**，支持专业/简洁/礼貌/正式风格 |
-| `email_drafting` ✨ | 邮件撰写与回复 | **新增**，支持新邮件/回复/转发场景 |
-| `info_extraction` ✨ | 信息抽取 | **新增**，从文本提取人名/时间/金额/地点/动作/组织 |
+| Skill 名称              | 功能      | 说明                                                                                                    |
+| --------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `file_summary`        | 文件理解与摘要 | 调用 get\_file\_content/summarize\_file，生成结构化摘要                                                         |
+| `report_generation`   | 报告生成    | **合并原 work\_report + daily\_digest**，按时间范围路由（日报→generate\_daily\_digest，周报/月报→generate\_work\_report） |
+| `smart_reply`         | 智能回复建议  | 调用 smart\_reply 工具生成多风格回复                                                                             |
+| `todo_management`     | 待办管理    | 调用 prioritize\_todos，支持超期标注、候选待办引导                                                                    |
+| `meeting_minutes`     | 会议纪要提取  | 从群聊消息提取会议主题/参会人/决议/行动项                                                                                |
+| `communication_query` | 沟通信息查询  | 查询聊天记录/最近消息/联系人列表                                                                                     |
+| `text_polish` ✨       | 文本润色与改写 | **新增**，支持专业/简洁/礼貌/正式风格                                                                                |
+| `email_drafting` ✨    | 邮件撰写与回复 | **新增**，支持新邮件/回复/转发场景                                                                                  |
+| `info_extraction` ✨   | 信息抽取    | **新增**，从文本提取人名/时间/金额/地点/动作/组织                                                                         |
 
 **核心函数**：
 
@@ -656,9 +658,10 @@ flowchart TD
 **匹配冲突消解**：每个 Skill 定义 `priority` 字段（数字越大越优先），当多个 Skill 得分相同时，高优先级胜出。例如"帮我回复"同时匹配 `smart_reply`(priority=4) 和 `communication_query`(priority=1)，最终走 `smart_reply`。
 
 **删除的 Skill**：
+
 - `message_classification`（消息意图分类）— 前端按钮触发更合适（`/ai/classify-message` 端点保留），对话式价值低。
 
-### 11.2 chat_with_ai 集成 Skills 路由
+### 11.2 chat\_with\_ai 集成 Skills 路由
 
 `glm_ai.chat_with_ai()` 在组装 system prompt 时，先调用 `skills.get_matched_skill(message)` 匹配意图，将匹配到的 Skill 专属 prompt 拼接到通用 system prompt 之后：
 
@@ -676,28 +679,31 @@ if skill_prompt:
 
 均通过 `_ai_call(prompt, expect_json=True)` 调用，要求返回结构化 JSON：
 
-#### polish_text(text, style=None)
+#### polish\_text(text, style=None)
+
 - 输入：原文 + 期望风格（专业/简洁/礼貌/正式，可选）
 - 输出：`{default_version, variants:[{style, content}], changes}`
 - 原则：保留原意、修正病句、不过度改写
 
-#### draft_email(scene, recipient, topic, points, original, language)
+#### draft\_email(scene, recipient, topic, points, original, language)
+
 - 输入：场景（new/reply/forward）+ 收件人 + 主题 + 要点 + 原邮件 + 语言
 - 输出：`{subject, body, placeholders}`
 - 原则：正文≤200字、不编造事实、待补充项用 `[待补充：xxx]` 标记
 
-#### extract_information(text, types=None)
+#### extract\_information(text, types=None)
+
 - 输入：文本 + 要抽取的类型列表（人名/时间/金额/地点/动作/组织，可选）
 - 输出：`{人名:[...], 时间:[...], 金额:[...], 地点:[...], 动作:[...], 组织:[...]}`
 - 原则：只抽取原文明确出现的信息、不推断、不补全
 
 ### 11.4 新增 3 个 API 端点（`backend/routes/ai.py`）
 
-| 端点 | 方法 | 参数方式 | 说明 |
-|------|------|---------|------|
-| `/api/ai/polish` | POST | Query: text, style | 文本润色 |
-| `/api/ai/draft-email` | POST | Body: DraftEmailRequest | 邮件起草（参数多，用 body） |
-| `/api/ai/extract-info` | POST | Body: ExtractInfoRequest | 信息抽取 |
+| 端点                     | 方法   | 参数方式                     | 说明               |
+| ---------------------- | ---- | ------------------------ | ---------------- |
+| `/api/ai/polish`       | POST | Query: text, style       | 文本润色             |
+| `/api/ai/draft-email`  | POST | Body: DraftEmailRequest  | 邮件起草（参数多，用 body） |
+| `/api/ai/extract-info` | POST | Body: ExtractInfoRequest | 信息抽取             |
 
 同时更新 `GET /api/ai/tools` 端点，追加 3 个新工具声明。
 
@@ -729,13 +735,14 @@ aiApi.extractInfo(text, types)             // POST /ai/extract-info (body)
 
 **优化方案**：
 
-| 会话类型 | 旧逻辑 | 新逻辑 |
-|---------|-------|-------|
-| 群聊 | 取最近 100 条（含无关消息） | 只取 `@所有人` 或 `@当前用户名` 的消息 |
-| 私聊 | 取最近 100 条 | 全量取 |
-| 时间范围 | 固定最近 100 条 | 今日消息 ∪ 最近 100 条（取并集，较大者） |
+| 会话类型 | 旧逻辑              | 新逻辑                      |
+| ---- | ---------------- | ------------------------ |
+| 群聊   | 取最近 100 条（含无关消息） | 只取 `@所有人` 或 `@当前用户名` 的消息 |
+| 私聊   | 取最近 100 条        | 全量取                      |
+| 时间范围 | 固定最近 100 条       | 今日消息 ∪ 最近 100 条（取并集，较大者） |
 
 **实现要点**：
+
 - 先区分 `group_contact_ids` 和 `private_contact_ids`
 - 群聊查询加 `Message.content.like("%@所有人%") | Message.content.like("%@{user_name}%")` 过滤
 - 分别查"今日消息"和"最近 100 条"，合并后按 message.id 去重
@@ -743,6 +750,6 @@ aiApi.extractInfo(text, types)             // POST /ai/extract-info (body)
 
 **效果**：群聊噪声被过滤，私聊不会被群聊淹没，今日全部消息都能扫到。
 
----
+***
 
 *内部IM智能助手 - 功能实现细节 v3.1 | 2026-07-20*
