@@ -74,6 +74,7 @@ export const todosApi = {
   createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`),
   // 候选待办
   scanCandidates: (userId) => api.post(`/todos/scan-candidates/${userId}`, {}, { timeout: 120000 }),
+  rescanEmails: (userId) => api.post(`/todos/rescan-emails/${userId}`),
   getCandidates: (userId) => api.get(`/todos/candidates/${userId}`),
   confirmCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/confirm`),
   dismissCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/dismiss`)
@@ -86,7 +87,7 @@ export const emailsApi = {
     api.post(`/emails/send/${userId}`, { to, subject, content, body_type, attachment_file_ids }, { timeout: 30000 }),
   addToTodo: (userId, emailId) => api.post(`/emails/add-to-todo/${userId}/${emailId}`),
   scan: (userId) => api.post(`/emails/scan/${userId}`, {}, { timeout: 120000 }),
-  getTodos: (userId) => api.get(`/emails/todos/${userId}`),
+  getTodos: (userId, status) => api.get(`/emails/todos/${userId}${status ? `?status=${status}` : ''}`),
   updateTodo: (todoId, action) => api.put(`/emails/todos/${todoId}?action=${action}`),
   getTrackers: (userId) => api.get(`/emails/trackers/${userId}`),
   track: (emailId) => api.post(`/emails/track/${emailId}`),

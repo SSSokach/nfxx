@@ -226,10 +226,17 @@ def get_chat_todos(
     if status:
         query = query.filter(ChatTodoItem.status == status)
     todos = query.order_by(ChatTodoItem.created_at.desc()).all()
+    # 批量查询所有 source_id 对应的 contact_id（避免 N+1 查询）
+    msg_ids = [t.source_id for t in todos if t.source_id]
+    msg_contact_map = {}
+    if msg_ids:
+        msgs = db.query(Message).filter(Message.id.in_(msg_ids)).all()
+        msg_contact_map = {m.id: m.contact_id for m in msgs}
     return [
         {
             "id": t.id,
             "source_id": t.source_id,
+            "contact_id": msg_contact_map.get(t.source_id) if t.source_id else None,
             "source_type": t.source_type,
             "group_name": t.group_name,
             "peer_name": t.peer_name,
@@ -606,11 +613,12 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
             CandidateTodo.source_email_id.isnot(None),
         ).all()
     }
-    # 已有正式邮件待办
+    # 已有正式邮件待办（只排除未删除的，已删除的允许重新扫描）
     todo_email_ids = {
         int(t.source_id) for t in db.query(EmailTodoItem).filter(
             EmailTodoItem.user_id == user_id,
             EmailTodoItem.source_id.isnot(None),
+            EmailTodoItem.status != "deleted",
         ).all()
         if (t.source_id or "").isdigit()
     }
@@ -819,4 +827,27 @@ def dismiss_candidate(candidate_id: int, db: Session = Depends(get_db)):
         "candidate_id": candidate.id,
         "status": "dismissed",
         "message": "候选待办已忽略",
+    }
+
+
+@router.post("/rescan-emails/{user_id}")
+def rescan_emails(user_id: int, db: Session = Depends(get_db)):
+    """重置邮件扫描记录，使所有邮件可以在下次扫描时重新被检测。
+
+    删除该用户的 ScannedEmail 记录，以及 pending/dismissed 状态的邮件候选待办。
+    已确认（confirmed）的候选和正式邮件待办不受影响，但其关联的邮件仍会重新扫描。
+    """
+    # 删除已扫描邮件记录
+    db.query(ScannedEmail).filter(ScannedEmail.user_id == user_id).delete()
+    # 删除未确认和已忽略的邮件候选待办（保留 confirmed 的）
+    db.query(CandidateTodo).filter(
+        CandidateTodo.user_id == user_id,
+        CandidateTodo.source_email_id.isnot(None),
+        CandidateTodo.status.in_(["pending", "dismissed"]),
+    ).delete()
+    db.commit()
+
+    return {
+        "user_id": user_id,
+        "message": "邮件扫描记录已重置，可重新扫描邮件",
     }
