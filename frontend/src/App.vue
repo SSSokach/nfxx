@@ -11,7 +11,7 @@
             @contact-select="handleContactSelect"
             @view-change="handleViewChange"
           />
-          <div ref="chatAreaWrapRef" class="chat-area-wrap">
+          <div class="chat-area-wrap">
             <ChatArea
               :selected-contact="selectedContact"
               :current-user-id="currentUserId"
@@ -57,12 +57,15 @@
             :current-user-id="currentUserId"
             :context-message="aiContextMessage"
             :todo-refresh-key="todoRefreshKey"
+            :width="aiPanelWidth"
+            @resize="handleAiPanelResize"
             @jump-to-message="handleJumpToMessage"
             @jump-to-email="handleJumpToEmail"
             @close="aiPanelVisible = false"
           />
         </transition>
-        <!-- Floating AI button when panel hidden (draggable + edge-hide) -->
+
+        <!-- Floating AI button (draggable + edge-hide, independent of view) -->
         <div
           v-if="!aiPanelVisible"
           ref="aiFabRef"
@@ -88,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, nextTick } from 'vue'
 import ContactList from './components/ContactList.vue'
 import ChatArea from './components/ChatArea.vue'
 import EmailList from './components/EmailList.vue'
@@ -230,38 +233,24 @@ const onResize = () => {
   if (!isEdgeHidden.value) checkEdgeHide()
 }
 
-// 根据贴边状态决定尺寸/位置样式
-const fabStyle = computed(() => {
-  const b = getChatBounds()
-  let w = FAB_SIZE, h = FAB_SIZE, r = '50%'
-  if (isEdgeHidden.value) {
-    // 贴边后收缩：判断贴的是左右还是上下
-    const { x, y } = fabPos.value
-    const onLeft = Math.abs(x - b.left) < 2
-    const onRight = Math.abs(x - (b.right - FAB_SIZE)) < 2
-    if (onLeft || onRight) { w = 14; h = 56; r = '8px' }
-    else { w = 56; h = 14; r = '8px' }
-  }
-  return {
-    left: fabPos.value.x + 'px',
-    top: fabPos.value.y + 'px',
-    width: w + 'px',
-    height: h + 'px',
-    borderRadius: r,
-    right: 'auto',
-    bottom: 'auto'
-  }
-})
-
-onMounted(() => {
-  initFabPos()
-  window.addEventListener('resize', onResize)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize)
-  document.removeEventListener('mousemove', onFabMouseMove)
-  document.removeEventListener('mouseup', onFabMouseUp)
-})
+// ===== AI Panel width (user-resizable, persisted) =====
+const AI_PANEL_MIN_WIDTH = 280
+const AI_PANEL_MAX_WIDTH = 720
+const AI_PANEL_DEFAULT_WIDTH = 360
+const AI_PANEL_WIDTH_KEY = 'aiPanelWidth'
+const readStoredWidth = () => {
+  if (typeof window === 'undefined') return AI_PANEL_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(AI_PANEL_WIDTH_KEY)
+  const n = raw ? parseInt(raw, 10) : NaN
+  if (isNaN(n)) return AI_PANEL_DEFAULT_WIDTH
+  return Math.max(AI_PANEL_MIN_WIDTH, Math.min(AI_PANEL_MAX_WIDTH, n))
+}
+const aiPanelWidth = ref(readStoredWidth())
+const handleAiPanelResize = (width) => {
+  const clamped = Math.max(AI_PANEL_MIN_WIDTH, Math.min(AI_PANEL_MAX_WIDTH, width))
+  aiPanelWidth.value = clamped
+  try { window.localStorage.setItem(AI_PANEL_WIDTH_KEY, String(clamped)) } catch {}
+}
 
 // 视图模式：messages / emails
 const viewMode = ref('messages')
@@ -442,103 +431,46 @@ body { font-family: -apple-system, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft Ya
   opacity: 0;
 }
 
-/* ===== Floating AI Button (minimal modern style) ===== */
-.ai-fab {
-  position: fixed;
+/* ===== 右上角 AI 助手展开按钮 ===== */
+.ai-toggle-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
   background: #ffffff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.06);
-  cursor: grab;
+  color: #3b82f6;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.3s ease,
-              opacity 0.3s ease;
-  user-select: none;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-}
-.ai-fab.dragging {
-  cursor: grabbing;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  opacity: 0.92;
-}
-.ai-fab:hover {
-  box-shadow: 0 8px 28px rgba(59, 130, 246, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
-  border-color: rgba(59, 130, 246, 0.2);
-}
-.ai-fab-svg {
-  width: 28px;
-  height: 28px;
-  color: #3b82f6;
-  transition: transform 0.3s ease, color 0.3s ease;
-}
-.ai-fab:hover .ai-fab-svg {
-  color: #2563eb;
-  transform: scale(1.08);
-}
-.ai-fab-label {
-  font-size: 10px;
-  color: #64748b;
-  margin-top: 2px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  transition: opacity 0.3s ease;
-}
-
-/* Pulse ring animation */
-.ai-fab-pulse {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(59, 130, 246, 0.3);
-  animation: aiFabPulse 2.4s ease-out infinite;
-}
-@keyframes aiFabPulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
-
-/* Edge-hidden state: collapse to a slim bar (inside chat area) */
-.ai-fab.edge-hidden {
-  background: #3b82f6;
-  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.35);
-  opacity: 0.92;
-  border: 1px solid rgba(59, 130, 246, 0.5);
-}
-.ai-fab.edge-hidden:hover {
-  opacity: 1;
-  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.5);
-}
-.ai-fab.edge-hidden .ai-fab-svg {
-  width: 12px;
-  height: 12px;
-  color: #ffffff;
-}
-.ai-fab-edge-hint {
-  display: flex;
-  flex-direction: column;
   gap: 1px;
-  margin-top: 1px;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 3px rgba(0, 0, 0, 0.04);
+  z-index: 50;
+  transition: all 0.18s ease;
+  padding: 0;
 }
-.ai-fab-edge-hint span {
-  font-size: 7px;
+.ai-toggle-btn:hover {
+  background: #3b82f6;
   color: #ffffff;
-  font-weight: 600;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+  transform: translateY(-1px);
+}
+.ai-toggle-btn:active {
+  transform: translateY(0);
+}
+.ai-toggle-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.ai-toggle-btn-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   line-height: 1;
-}
-
-/* Fade scale transition for FAB */
-.fade-scale-enter-active,
-.fade-scale-leave-active {
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.fade-scale-enter-from,
-.fade-scale-leave-to {
-  transform: scale(0);
-  opacity: 0;
 }
 </style>
