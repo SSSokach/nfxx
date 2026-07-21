@@ -163,15 +163,33 @@
         <div class="todo-col">
           <div class="todo-col-header">
             <span class="todo-col-title">✅ 待办列表</span>
+            <div class="todo-filter-switch">
+              <button
+                class="filter-btn"
+                :class="{ active: todoFilter === 'pending' }"
+                @click="setTodoFilter('pending')"
+              >待处理</button>
+              <button
+                class="filter-btn"
+                :class="{ active: todoFilter === 'completed' }"
+                @click="setTodoFilter('completed')"
+              >已完成</button>
+            </div>
           </div>
           <div v-if="todoLoading && mergedTodos.length === 0" class="pane-loading">加载中...</div>
           <div class="todo-scroll">
-            <div v-if="mergedTodos.length === 0 && !todoLoading" class="pane-empty">暂无待办</div>
+            <div v-if="mergedTodos.length === 0 && !todoLoading" class="pane-empty">
+              {{ todoFilter === 'pending' ? '暂无待办' : '暂无已完成待办' }}
+            </div>
             <div
               v-for="todo in mergedTodos"
               :key="todo.uid"
               class="todo-item"
-              :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed', clickable: todo.status === 'pending' }"
+              :class="{
+                overdue: todoFilter === 'pending' && isOverdue(todo.deadline),
+                completed: todoFilter === 'completed',
+                clickable: todoFilter === 'pending'
+              }"
               @click="handleTodoClick(todo)"
             >
               <div class="todo-content">{{ todo.content || todo.title }}</div>
@@ -181,13 +199,13 @@
                 <span class="meta-tag" v-else>👥 群聊</span>
                 <span class="meta-tag" v-if="todo.source_name">📁 {{ todo.source_name }}</span>
                 <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
-                <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
+                <span v-if="todoFilter === 'completed' && todo.completed_at" class="meta-time">✔️ {{ formatDate(todo.completed_at) }}</span>
               </div>
-              <div class="todo-jump-hint" v-if="todo.status === 'pending'">
+              <div class="todo-jump-hint" v-if="todoFilter === 'pending'">
                 <span v-if="todo.type === 'chat'">🔗 点击跳转到消息</span>
                 <span v-else>🔗 点击查看邮件</span>
               </div>
-              <div class="todo-actions" v-if="todo.status === 'pending'" @click.stop>
+              <div class="todo-actions" v-if="todoFilter === 'pending'" @click.stop>
                 <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
                 <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
               </div>
@@ -434,6 +452,7 @@ watch(() => props.currentUserId, () => {
   chatTodos.value = []
   emailTodos.value = []
   candidateTodos.value = []
+  todoFilter.value = 'pending'
   loadAllTodos()
   loadCandidates()
 })
@@ -523,6 +542,15 @@ const chatTodos = ref([])
 const emailTodos = ref([])
 const todoLoading = ref(false)
 const todoError = ref('')
+// 待办列表筛选：'pending'（待处理） | 'completed'（已完成）
+// 删除态不展示，删除后直接从列表移除
+const todoFilter = ref('pending')
+
+const setTodoFilter = (filter) => {
+  if (todoFilter.value === filter) return
+  todoFilter.value = filter
+  loadAllTodos()
+}
 
 const mergedTodos = computed(() => {
   const chatItems = chatTodos.value.map(t => ({
@@ -532,6 +560,8 @@ const mergedTodos = computed(() => {
     content: t.content,
     deadline: t.deadline,
     status: t.status,
+    created_at: t.created_at,
+    completed_at: t.completed_at,
     source_type: t.source_type || 'group',
     source_name: t.group_name || t.peer_name || '',
     message_id: t.source_id,
@@ -544,6 +574,8 @@ const mergedTodos = computed(() => {
     content: t.content || t.subject,
     deadline: t.deadline,
     status: t.status,
+    created_at: t.created_at,
+    completed_at: t.completed_at,
     source_type: 'email',
     source_name: t.subject || '',
     email_id: t.source_id,
@@ -551,11 +583,11 @@ const mergedTodos = computed(() => {
     email_sender: t.sender,
     email_content: t.content
   }))
-  // Sort: pending first, then by created_at desc
+  // 当前列表数据已按同一 status 拉取，仅按 created_at 倒序排列
   return [...chatItems, ...emailItems].sort((a, b) => {
-    if (a.status === 'pending' && b.status !== 'pending') return -1
-    if (a.status !== 'pending' && b.status === 'pending') return 1
-    return 0
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+    return bTime - aTime
   })
 })
 
@@ -564,9 +596,10 @@ const loadAllTodos = async () => {
   todoLoading.value = true
   todoError.value = ''
   try {
+    const status = todoFilter.value
     const [chatRes, emailRes] = await Promise.all([
-      todosApi.getChatTodos(props.currentUserId, 'pending'),
-      emailsApi.getTodos(props.currentUserId)
+      todosApi.getChatTodos(props.currentUserId, status),
+      emailsApi.getTodos(props.currentUserId, status)
     ])
     chatTodos.value = chatRes.data || []
     emailTodos.value = emailRes.data || []
@@ -1407,6 +1440,38 @@ const checkAllForms = async () => {
   font-size: 13px;
   font-weight: 600;
   color: #4a4a5e;
+}
+
+/* 待办列表 待处理/已完成 切换开关 */
+.todo-filter-switch {
+  display: inline-flex;
+  background-color: #eceef3;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.filter-btn {
+  border: none;
+  background: transparent;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #6b7280;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+
+.filter-btn:hover:not(.active) {
+  color: #4a4a5e;
+}
+
+.filter-btn.active {
+  background-color: #ffffff;
+  color: #1f2937;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .todo-scan-btn {

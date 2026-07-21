@@ -11,7 +11,7 @@
             @contact-select="handleContactSelect"
             @view-change="handleViewChange"
           />
-          <div ref="chatAreaWrapRef" class="chat-area-wrap">
+          <div class="chat-area-wrap">
             <ChatArea
               :selected-contact="selectedContact"
               :current-user-id="currentUserId"
@@ -22,40 +22,6 @@
               @todo-created="handleTodoCreated"
               @scroll-to-message="handleScrollToMessage"
             />
-          </div>
-          <!-- AI Panel as slide-in drawer -->
-          <transition name="slide-ai">
-            <AIPanel
-              v-show="aiPanelVisible"
-              :current-user-id="currentUserId"
-              :context-message="aiContextMessage"
-              :todo-refresh-key="todoRefreshKey"
-              :width="aiPanelWidth"
-              @resize="handleAiPanelResize"
-              @jump-to-message="handleJumpToMessage"
-              @jump-to-email="handleJumpToEmail"
-              @close="aiPanelVisible = false"
-            />
-          </transition>
-          <!-- Floating AI button when panel hidden (draggable + edge-hide) -->
-          <div
-            v-if="!aiPanelVisible"
-            ref="aiFabRef"
-            class="ai-fab"
-            :class="{ 'edge-hidden': isEdgeHidden, 'dragging': isDragging }"
-            :style="fabStyle"
-            @mousedown="onFabMouseDown"
-          >
-            <div class="ai-fab-pulse" v-if="!isDragging && !isEdgeHidden"></div>
-            <svg class="ai-fab-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="currentColor"/>
-              <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.6"/>
-              <circle cx="5" cy="19" r="1" fill="currentColor" opacity="0.4"/>
-            </svg>
-            <span class="ai-fab-label" v-if="!isEdgeHidden">AI</span>
-            <div class="ai-fab-edge-hint" v-if="isEdgeHidden">
-              <span>点</span><span>击</span>
-            </div>
           </div>
         </template>
 
@@ -80,13 +46,43 @@
             @email-sent="handleEmailSent"
           />
         </template>
+
+        <!-- AI Panel：与视图解耦，开关状态不随 messages/emails 切换而改变 -->
+        <transition name="slide-ai">
+          <AIPanel
+            v-show="aiPanelVisible"
+            :current-user-id="currentUserId"
+            :context-message="aiContextMessage"
+            :todo-refresh-key="todoRefreshKey"
+            :width="aiPanelWidth"
+            @resize="handleAiPanelResize"
+            @jump-to-message="handleJumpToMessage"
+            @jump-to-email="handleJumpToEmail"
+            @close="aiPanelVisible = false"
+          />
+        </transition>
+
+        <!-- 展开右侧 AI 面板的按钮（固定在右上角，两个视图都可见） -->
+        <button
+          v-if="!aiPanelVisible"
+          class="ai-toggle-btn"
+          title="打开 AI 助手"
+          @click="openAIPanel"
+        >
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="currentColor"/>
+            <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.6"/>
+            <circle cx="5" cy="19" r="1" fill="currentColor" opacity="0.4"/>
+          </svg>
+          <span class="ai-toggle-btn-label">AI</span>
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, nextTick } from 'vue'
 import ContactList from './components/ContactList.vue'
 import ChatArea from './components/ChatArea.vue'
 import EmailList from './components/EmailList.vue'
@@ -122,159 +118,6 @@ const handleAiPanelResize = (width) => {
   aiPanelWidth.value = clamped
   try { window.localStorage.setItem(AI_PANEL_WIDTH_KEY, String(clamped)) } catch {}
 }
-
-// ===== Floating AI button: draggable + edge-hide =====
-const aiFabRef = ref(null)
-const chatAreaWrapRef = ref(null)
-const fabPos = ref({ x: typeof window !== 'undefined' ? window.innerWidth - 96 : 800, y: typeof window !== 'undefined' ? window.innerHeight - 96 : 600 })
-const isDragging = ref(false)
-const isEdgeHidden = ref(false)
-const dragState = ref({ startX: 0, startY: 0, originX: 0, originY: 0, moved: false })
-
-const FAB_SIZE = 64
-const EDGE_THRESHOLD = 50      // 距离边框小于此值视为贴边
-const EDGE_HIDE_OFFSET = 36     // 贴边隐藏时露出的宽度
-
-// 获取聊天框边界
-const getChatBounds = () => {
-  if (chatAreaWrapRef.value) {
-    return chatAreaWrapRef.value.getBoundingClientRect()
-  }
-  // fallback: 整个窗口
-  return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight }
-}
-
-const initFabPos = () => {
-  const b = getChatBounds()
-  fabPos.value = {
-    x: b.right - FAB_SIZE - 32,
-    y: b.bottom - FAB_SIZE - 32
-  }
-}
-
-const onFabMouseDown = (e) => {
-  if (e.button !== 0) return
-  isDragging.value = true
-  isEdgeHidden.value = false
-  dragState.value = {
-    startX: e.clientX,
-    startY: e.clientY,
-    originX: fabPos.value.x,
-    originY: fabPos.value.y,
-    moved: false
-  }
-  document.addEventListener('mousemove', onFabMouseMove)
-  document.addEventListener('mouseup', onFabMouseUp)
-}
-
-const onFabMouseMove = (e) => {
-  const dx = e.clientX - dragState.value.startX
-  const dy = e.clientY - dragState.value.startY
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.value.moved = true
-  const b = getChatBounds()
-  let nx = dragState.value.originX + dx
-  let ny = dragState.value.originY + dy
-  // 约束在聊天框范围内
-  nx = Math.max(b.left, Math.min(b.right - FAB_SIZE, nx))
-  ny = Math.max(b.top, Math.min(b.bottom - FAB_SIZE, ny))
-  fabPos.value = { x: nx, y: ny }
-}
-
-const onFabMouseUp = () => {
-  const wasMoved = dragState.value.moved
-  isDragging.value = false
-  document.removeEventListener('mousemove', onFabMouseMove)
-  document.removeEventListener('mouseup', onFabMouseUp)
-  if (wasMoved) {
-    // 拖动结束，检查贴边
-    checkEdgeHide()
-  } else {
-    // 未移动 = 点击：贴边状态先恢复，否则打开面板
-    if (isEdgeHidden.value) {
-      isEdgeHidden.value = false
-      const b = getChatBounds()
-      fabPos.value = { x: b.right - FAB_SIZE - 32, y: b.bottom - FAB_SIZE - 32 }
-    } else {
-      openAIPanel()
-    }
-  }
-}
-
-const checkEdgeHide = () => {
-  const b = getChatBounds()
-  const { x, y } = fabPos.value
-  // 距聊天框四边内侧的距离
-  const distLeft = x - b.left
-  const distRight = b.right - FAB_SIZE - x
-  const distTop = y - b.top
-  const distBottom = b.bottom - FAB_SIZE - y
-  const minDist = Math.min(distLeft, distRight, distTop, distBottom)
-  if (minDist < EDGE_THRESHOLD) {
-    isEdgeHidden.value = true
-    // 贴到聊天框内侧边缘
-    if (distLeft === minDist) fabPos.value.x = b.left
-    else if (distRight === minDist) fabPos.value.x = b.right - FAB_SIZE
-    else if (distTop === minDist) fabPos.value.y = b.top
-    else fabPos.value.y = b.bottom - FAB_SIZE
-  } else {
-    isEdgeHidden.value = false
-  }
-}
-
-const onFabClick = () => {
-  // 兼容触摸/键盘点击：未拖动时唤起
-  if (dragState.value.moved) return
-  if (isEdgeHidden.value) {
-    isEdgeHidden.value = false
-    const b = getChatBounds()
-    fabPos.value = { x: b.right - FAB_SIZE - 32, y: b.bottom - FAB_SIZE - 32 }
-    return
-  }
-  openAIPanel()
-}
-
-const onResize = () => {
-  const b = getChatBounds()
-  const { x, y } = fabPos.value
-  fabPos.value = {
-    x: Math.max(b.left, Math.min(b.right - FAB_SIZE, x)),
-    y: Math.max(b.top, Math.min(b.bottom - FAB_SIZE, y))
-  }
-  if (!isEdgeHidden.value) checkEdgeHide()
-}
-
-// 根据贴边状态决定尺寸/位置样式
-const fabStyle = computed(() => {
-  const b = getChatBounds()
-  let w = FAB_SIZE, h = FAB_SIZE, r = '50%'
-  if (isEdgeHidden.value) {
-    // 贴边后收缩：判断贴的是左右还是上下
-    const { x, y } = fabPos.value
-    const onLeft = Math.abs(x - b.left) < 2
-    const onRight = Math.abs(x - (b.right - FAB_SIZE)) < 2
-    if (onLeft || onRight) { w = 14; h = 56; r = '8px' }
-    else { w = 56; h = 14; r = '8px' }
-  }
-  return {
-    left: fabPos.value.x + 'px',
-    top: fabPos.value.y + 'px',
-    width: w + 'px',
-    height: h + 'px',
-    borderRadius: r,
-    right: 'auto',
-    bottom: 'auto'
-  }
-})
-
-onMounted(() => {
-  initFabPos()
-  window.addEventListener('resize', onResize)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize)
-  document.removeEventListener('mousemove', onFabMouseMove)
-  document.removeEventListener('mouseup', onFabMouseUp)
-})
 
 // 视图模式：messages / emails
 const viewMode = ref('messages')
@@ -437,103 +280,46 @@ body { font-family: -apple-system, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft Ya
   opacity: 0;
 }
 
-/* ===== Floating AI Button (minimal modern style) ===== */
-.ai-fab {
-  position: fixed;
+/* ===== 右上角 AI 助手展开按钮 ===== */
+.ai-toggle-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
   background: #ffffff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.06);
-  cursor: grab;
+  color: #3b82f6;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.3s ease,
-              opacity 0.3s ease;
-  user-select: none;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-}
-.ai-fab.dragging {
-  cursor: grabbing;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  opacity: 0.92;
-}
-.ai-fab:hover {
-  box-shadow: 0 8px 28px rgba(59, 130, 246, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
-  border-color: rgba(59, 130, 246, 0.2);
-}
-.ai-fab-svg {
-  width: 28px;
-  height: 28px;
-  color: #3b82f6;
-  transition: transform 0.3s ease, color 0.3s ease;
-}
-.ai-fab:hover .ai-fab-svg {
-  color: #2563eb;
-  transform: scale(1.08);
-}
-.ai-fab-label {
-  font-size: 10px;
-  color: #64748b;
-  margin-top: 2px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  transition: opacity 0.3s ease;
-}
-
-/* Pulse ring animation */
-.ai-fab-pulse {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(59, 130, 246, 0.3);
-  animation: aiFabPulse 2.4s ease-out infinite;
-}
-@keyframes aiFabPulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
-
-/* Edge-hidden state: collapse to a slim bar (inside chat area) */
-.ai-fab.edge-hidden {
-  background: #3b82f6;
-  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.35);
-  opacity: 0.92;
-  border: 1px solid rgba(59, 130, 246, 0.5);
-}
-.ai-fab.edge-hidden:hover {
-  opacity: 1;
-  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.5);
-}
-.ai-fab.edge-hidden .ai-fab-svg {
-  width: 12px;
-  height: 12px;
-  color: #ffffff;
-}
-.ai-fab-edge-hint {
-  display: flex;
-  flex-direction: column;
   gap: 1px;
-  margin-top: 1px;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 3px rgba(0, 0, 0, 0.04);
+  z-index: 50;
+  transition: all 0.18s ease;
+  padding: 0;
 }
-.ai-fab-edge-hint span {
-  font-size: 7px;
+.ai-toggle-btn:hover {
+  background: #3b82f6;
   color: #ffffff;
-  font-weight: 600;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+  transform: translateY(-1px);
+}
+.ai-toggle-btn:active {
+  transform: translateY(0);
+}
+.ai-toggle-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.ai-toggle-btn-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   line-height: 1;
-}
-
-/* Fade scale transition for FAB */
-.fade-scale-enter-active,
-.fade-scale-leave-active {
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.fade-scale-enter-from,
-.fade-scale-leave-to {
-  transform: scale(0);
-  opacity: 0;
 }
 </style>
