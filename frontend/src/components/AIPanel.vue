@@ -10,6 +10,7 @@
         <div class="ai-header-actions">
           <button class="ai-new-chat-btn" v-if="activeTab === 'chat'" @click="newConversation">+ 新对话</button>
           <div class="ai-user-badge">用户 {{ currentUserLabel }}</div>
+          <button class="ai-close-btn" @click="emit('close')" title="收起">✕</button>
         </div>
       </div>
     </div>
@@ -60,17 +61,6 @@
           <div v-if="aiLoading" class="ai-message assistant">处理中...</div>
         </div>
 
-        <div class="ai-context-banner" :class="{ email: localContext?.source_type === 'email' }" v-if="localContext">
-          <div class="ai-context-card">
-            <div class="ai-context-line"></div>
-            <div class="ai-context-body">
-              <span class="ai-context-name">{{ localContext.sender_name }}</span>
-              <span class="ai-context-text">: {{ localContext.content.substring(0, 60) }}{{ localContext.content.length > 60 ? '...' : '' }}</span>
-            </div>
-          </div>
-          <button class="ai-context-close" @click="clearContext">×</button>
-        </div>
-
         <!-- Quick prompt bubbles (above input, vertical, only before first message) -->
         <div class="ai-quick-bubbles-vertical" v-if="showQuickBubbles">
           <button
@@ -80,6 +70,17 @@
             :disabled="aiLoading"
             @click="fillPrompt(btn.prompt)"
           >{{ btn.label }}</button>
+        </div>
+
+        <div class="ai-context-banner" :class="{ email: localContext?.source_type === 'email' }" v-if="localContext">
+          <div class="ai-context-card">
+            <div class="ai-context-line"></div>
+            <div class="ai-context-body">
+              <span class="ai-context-name">{{ localContext.sender_name }}</span>
+              <span class="ai-context-text">: {{ localContext.content.substring(0, 60) }}{{ localContext.content.length > 60 ? '...' : '' }}</span>
+            </div>
+          </div>
+          <button class="ai-context-close" @click="clearContext">×</button>
         </div>
 
         <div class="ai-usage-bar" v-if="aiUsage.request_count > 0 || aiUsage.token_count > 0">
@@ -111,13 +112,20 @@
         <div class="todo-col">
           <div class="todo-col-header">
             <span class="todo-col-title">🔍 候选待办</span>
-            <button
-              class="todo-scan-btn"
-              :disabled="candidateScanning"
-              @click="scanCandidates"
-            >{{ candidateScanning ? '扫描中...' : 'AI扫描' }}</button>
+            <div class="todo-scan-group">
+              <button
+                class="todo-scan-btn"
+                :disabled="candidateScanning || emailScanning"
+                @click="scanCandidates"
+              >{{ candidateScanning ? '扫描中...' : 'AI扫描消息' }}</button>
+              <button
+                class="todo-scan-btn email"
+                :disabled="candidateScanning || emailScanning"
+                @click="scanEmails"
+              >{{ emailScanning ? '扫描中...' : '扫描邮件' }}</button>
+            </div>
           </div>
-          <div v-if="candidateScanning && candidateTodos.length === 0" class="pane-loading">AI 正在扫描消息...</div>
+          <div v-if="(candidateScanning || emailScanning) && candidateTodos.length === 0" class="pane-loading">AI 正在扫描...</div>
           <div class="todo-scroll">
             <div v-if="candidateTodos.length === 0 && !candidateScanning" class="pane-empty">暂无候选待办</div>
             <div
@@ -155,7 +163,8 @@
               v-for="todo in mergedTodos"
               :key="todo.uid"
               class="todo-item"
-              :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed' }"
+              :class="{ overdue: !todo.completed && isOverdue(todo.deadline), completed: todo.status === 'completed', clickable: todo.status === 'pending' }"
+              @click="handleTodoClick(todo)"
             >
               <div class="todo-content">{{ todo.content || todo.title }}</div>
               <div class="todo-meta">
@@ -166,7 +175,11 @@
                 <span class="meta-time" v-if="todo.deadline">⏰ {{ formatDate(todo.deadline) }}</span>
                 <span class="status-badge" :class="todo.status">{{ statusLabel(todo.status) }}</span>
               </div>
-              <div class="todo-actions" v-if="todo.status === 'pending'">
+              <div class="todo-jump-hint" v-if="todo.status === 'pending'">
+                <span v-if="todo.type === 'chat'">🔗 点击跳转到消息</span>
+                <span v-else>🔗 点击查看邮件</span>
+              </div>
+              <div class="todo-actions" v-if="todo.status === 'pending'" @click.stop>
                 <button class="mini-btn success" @click="completeTodo(todo)">完成</button>
                 <button class="mini-btn danger" @click="deleteTodo(todo)">删除</button>
               </div>
@@ -227,6 +240,18 @@
       </div>
     </div>
 
+    <!-- Email Preview Modal -->
+    <div class="email-preview-overlay" v-if="emailPreview" @click.self="emailPreview = null">
+      <div class="email-preview-card">
+        <div class="email-preview-header">
+          <div class="email-preview-subject">{{ emailPreview.subject }}</div>
+          <button class="email-preview-close" @click="emailPreview = null">×</button>
+        </div>
+        <div class="email-preview-sender" v-if="emailPreview.sender">发件人：{{ emailPreview.sender }}</div>
+        <div class="email-preview-body">{{ emailPreview.content }}</div>
+      </div>
+    </div>
+
     <!-- Online Form Modal -->
     <OnlineFormModal
       :visible="onlineFormVisible"
@@ -251,6 +276,8 @@ const props = defineProps({
   contextMessage: { type: Object, default: null },
   todoRefreshKey: { type: Number, default: 0 }
 })
+
+const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close'])
 
 // ===== Tab management =====
 const activeTab = ref('chat')
@@ -322,12 +349,13 @@ const renderMarkdown = (text) => {
 const showQuickBubbles = computed(() => !hasUserSentMessage.value)
 
 // Quick prompt bubbles - click to fill input (not send)
+// 基于 skills.py 的 9 个 skill，展示 AI 实际功能
 const quickBubbles = [
-  // { label: '📄 总结文件内容', prompt: '请帮我总结文件内容' },
-  // { label: '📊 生成工作报告', prompt: '帮我总结一下我本周的主要工作内容' },
-  // { label: '📋 查看待办列表', prompt: '查看我的待办列表' },
-  // { label: '👥 查看联系人', prompt: '查看联系人列表' },
-  // { label: '💬 查看最近消息', prompt: '查看最近消息' }
+  { label: '📄 总结文件内容', prompt: '帮我总结文件内容' },
+  { label: '📊 生成工作报告', prompt: '帮我生成今日日报' },
+  { label: '✨ 文本润色', prompt: '帮我润色一段文字' },
+  { label: '✉️ 撰写邮件', prompt: '帮我写一封邮件' },
+  { label: '🔍 提取信息', prompt: '帮我从文本中提取关键信息' }
 ]
 
 const scrollToBottom = () => {
@@ -456,7 +484,9 @@ const mergedTodos = computed(() => {
     deadline: t.deadline,
     status: t.status,
     source_type: t.source_type || 'group',
-    source_name: t.group_name || t.peer_name || ''
+    source_name: t.group_name || t.peer_name || '',
+    message_id: t.source_id,
+    contact_id: t.contact_id
   }))
   const emailItems = emailTodos.value.map(t => ({
     uid: `email-${t.id}`,
@@ -466,7 +496,11 @@ const mergedTodos = computed(() => {
     deadline: t.deadline,
     status: t.status,
     source_type: 'email',
-    source_name: t.subject || ''
+    source_name: t.subject || '',
+    email_id: t.source_id,
+    email_subject: t.subject,
+    email_sender: t.sender,
+    email_content: t.content
   }))
   // Sort: pending first, then by created_at desc
   return [...chatItems, ...emailItems].sort((a, b) => {
@@ -521,6 +555,23 @@ const deleteTodo = async (todo) => {
   }
 }
 
+// ===== Todo click → jump to message/email =====
+const emailPreview = ref(null)
+
+const handleTodoClick = (todo) => {
+  if (todo.status !== 'pending') return
+  if (todo.type === 'chat' && todo.contact_id && todo.message_id) {
+    emit('jump-to-message', { contact_id: todo.contact_id, message_id: todo.message_id })
+  } else if (todo.type === 'email') {
+    // 显示邮件预览弹窗
+    emailPreview.value = {
+      subject: todo.email_subject || todo.source_name,
+      sender: todo.email_sender || '',
+      content: todo.email_content || todo.content
+    }
+  }
+}
+
 // ===== Candidate Todos =====
 const candidateTodos = ref([])
 const candidateScanning = ref(false)
@@ -546,6 +597,22 @@ const scanCandidates = async () => {
     todoError.value = 'AI 扫描失败'
   }
   candidateScanning.value = false
+}
+
+// 扫描邮件生成候选待办：先重置扫描记录，再触发扫描
+const emailScanning = ref(false)
+const scanEmails = async () => {
+  if (!props.currentUserId || emailScanning.value) return
+  emailScanning.value = true
+  todoError.value = ''
+  try {
+    await todosApi.rescanEmails(props.currentUserId)
+    await todosApi.scanCandidates(props.currentUserId)
+    await loadCandidates()
+  } catch (e) {
+    todoError.value = '邮件扫描失败'
+  }
+  emailScanning.value = false
 }
 
 const confirmCandidate = async (c) => {
@@ -1014,6 +1081,27 @@ const checkAllForms = async () => {
   background-color: rgba(255, 255, 255, 0.25);
 }
 
+.ai-close-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.ai-close-btn:hover {
+  background: rgba(239, 68, 68, 0.5);
+  color: white;
+  transform: rotate(90deg);
+}
+
 /* ===== Quick bubbles vertical (above input) ===== */
 .ai-quick-bubbles-vertical {
   display: flex;
@@ -1293,6 +1381,16 @@ const checkAllForms = async () => {
   cursor: not-allowed;
 }
 
+.todo-scan-group {
+  display: flex;
+  gap: 6px;
+}
+
+.todo-scan-btn.email {
+  border-color: #3b82f6;
+  background-color: #3b82f6;
+}
+
 .todo-scroll {
   flex: 1;
   overflow-y: auto;
@@ -1461,4 +1559,89 @@ const checkAllForms = async () => {
 .form-member-empty { color: #9ca3af; font-size: 12px; }
 .form-tracker-meta { color: #9ca3af; font-size: 11px; margin-top: 4px; }
 .form-tracker-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+/* ===== Todo click + jump styles ===== */
+.todo-item.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+}
+.todo-item.clickable:hover {
+  border-left-color: #6366f1;
+  background: rgba(99, 102, 241, 0.06);
+  transform: translateX(2px);
+}
+.todo-jump-hint {
+  font-size: 11px;
+  color: #6366f1;
+  margin-top: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.todo-item.clickable:hover .todo-jump-hint {
+  opacity: 1;
+}
+
+/* ===== Email preview modal ===== */
+.email-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+.email-preview-card {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 560px;
+  width: 90%;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.email-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.email-preview-subject {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+.email-preview-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #9ca3af;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+.email-preview-close:hover { color: #ef4444; }
+.email-preview-sender {
+  padding: 8px 20px;
+  font-size: 13px;
+  color: #6b7280;
+  border-bottom: 1px solid #f3f4f6;
+}
+.email-preview-body {
+  padding: 16px 20px;
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.7;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 </style>

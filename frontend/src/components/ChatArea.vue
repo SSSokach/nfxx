@@ -13,7 +13,7 @@
         v-for="message in messages"
         :key="message.id"
         class="message"
-        :class="{ self: message.is_self, selected: multiSelectMode && selectedMessages.includes(message.id) }"
+        :class="{ self: message.is_self, selected: multiSelectMode && selectedMessages.includes(message.id), highlighted: highlightMessageId === message.id }"
         @contextmenu.prevent="showContextMenu($event, message)"
         @click="multiSelectMode ? toggleSelect(message.id) : null"
       >
@@ -131,6 +131,9 @@
       </div>
       <div class="context-menu-item" @click="handleAiChat">
         <span class="menu-icon">🤖</span><span>AI对话</span>
+      </div>
+      <div class="context-menu-item" @click="handleAddTodo">
+        <span class="menu-icon">📝</span><span>加入待办</span>
       </div>
       <div class="context-menu-divider"></div>
       <div class="context-menu-item" @click="enterMultiSelect">
@@ -271,10 +274,11 @@ import { marked } from 'marked';
 const props = defineProps({
   selectedContact: Object,
   currentUserId: Number,
-  currentUser: Object
+  currentUser: Object,
+  highlightMessageId: { type: [Number, null], default: null }
 });
 
-const emit = defineEmits(['message-sent', 'ai-chat', 'todo-created']);
+const emit = defineEmits(['message-sent', 'ai-chat', 'todo-created', 'add-todo', 'scroll-to-message']);
 
 const messages = ref([]);
 const inputMessage = ref('');
@@ -529,6 +533,20 @@ const handleAiChat = () => {
   showToast('已发送到AI助手');
 };
 
+// === Add message as todo ===
+const handleAddTodo = async () => {
+  const msg = contextMenu.value.message;
+  if (!msg) return;
+  try {
+    await todosApi.createFromMessage(props.currentUserId, msg.id);
+    emit('todo-created');
+    showToast('已加入待办');
+  } catch (e) {
+    showToast('加入待办失败');
+  }
+  closeContextMenu();
+};
+
 // === Smart reply (button-triggered, AI-powered) ===
 const smartReplies = ref([]);
 const smartReplyVisible = ref(false);
@@ -672,6 +690,26 @@ watch(() => props.selectedContact, () => {
   loadMessages();
 }, { immediate: true });
 watch(() => props.currentUserId, loadMessages);
+
+// Scroll to highlighted message and auto-clear after 3s
+watch(() => props.highlightMessageId, async (msgId) => {
+  if (!msgId) return;
+  // 消息列表可能还在异步加载，重试查找几次
+  let el = null;
+  for (let i = 0; i < 5; i++) {
+    await nextTick();
+    await new Promise(r => setTimeout(r, 200));
+    el = messagesContainer.value?.querySelector('.message.highlighted');
+    if (el) break;
+  }
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  // Clear highlight after 3 seconds
+  setTimeout(() => {
+    emit('scroll-to-message', null);
+  }, 3000);
+});
 </script>
 
 <style scoped>
@@ -1193,5 +1231,16 @@ watch(() => props.currentUserId, loadMessages);
 
 .smart-reply-trigger.active {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* ===== Highlighted message (jump from todo) ===== */
+.message.highlighted {
+  animation: highlightPulse 3s ease;
+  border-radius: 8px;
+}
+@keyframes highlightPulse {
+  0%   { background: rgba(99, 102, 241, 0.25); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3); }
+  30%  { background: rgba(99, 102, 241, 0.15); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+  100% { background: transparent; box-shadow: none; }
 }
 </style>

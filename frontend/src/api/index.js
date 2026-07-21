@@ -69,6 +69,7 @@ export const todosApi = {
   createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`),
   // 候选待办
   scanCandidates: (userId) => api.post(`/todos/scan-candidates/${userId}`, {}, { timeout: 120000 }),
+  rescanEmails: (userId) => api.post(`/todos/rescan-emails/${userId}`),
   getCandidates: (userId) => api.get(`/todos/candidates/${userId}`),
   confirmCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/confirm`),
   dismissCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/dismiss`)
