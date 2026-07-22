@@ -94,6 +94,7 @@ def scan_messages(user_id: int, db: Session = Depends(get_db)):
     group_messages = db.query(Message).filter(
         Message.contact_id.in_(group_contact_ids),
         Message.sender_id != user_id,   # 只看别人发的消息
+        Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
     ).order_by(Message.created_at.asc()).all()
 
     for msg in group_messages:
@@ -488,6 +489,7 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
             Message.contact_id.in_(group_contact_ids),
             Message.sender_id != user_id,
             Message.created_at >= today_start,
+            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
             Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
         ).all()
         group_msgs_today = group_today_q
@@ -495,6 +497,7 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
         group_recent_q = db.query(Message).filter(
             Message.contact_id.in_(group_contact_ids),
             Message.sender_id != user_id,
+            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
             Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
         ).order_by(Message.created_at.desc()).limit(100).all()
         group_msgs_recent = group_recent_q
@@ -506,12 +509,14 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
         private_msgs_today = db.query(Message).filter(
             Message.contact_id.in_(private_contact_ids),
             Message.sender_id != user_id,
+            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
             Message.created_at >= today_start,
         ).all()
 
         private_msgs_recent = db.query(Message).filter(
             Message.contact_id.in_(private_contact_ids),
             Message.sender_id != user_id,
+            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
         ).order_by(Message.created_at.desc()).limit(100).all()
 
     # 合并：今日消息 与 最近100条 取并集（去重），实现"较大者"

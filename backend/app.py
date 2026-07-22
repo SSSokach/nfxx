@@ -56,6 +56,14 @@ def _run_lightweight_migration():
         ("emails", "attachment_file_ids", "attachment_file_ids TEXT DEFAULT ''"),
         ("candidate_todo", "source_email_id", "source_email_id INTEGER"),
         ("chat_todo_item", "form_id", "form_id INTEGER"),
+        ("form_tracker", "online_form_id", "online_form_id INTEGER"),
+        ("form_tracker", "file_collection_task_id", "file_collection_task_id INTEGER"),
+        ("form_tracker", "deadline", "deadline DATE"),
+        ("online_form", "deadline", "deadline DATE"),
+        ("online_form", "updated_at", "updated_at DATETIME"),
+        ("online_form_row", "member_user_id", "member_user_id INTEGER"),
+        ("online_form_row", "updated_at", "updated_at DATETIME"),
+        ("messages", "form_id", "form_id INTEGER"),
     ]
     with engine.begin() as conn:
         for table, column, ddl in migrations:

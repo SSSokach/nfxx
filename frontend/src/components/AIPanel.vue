@@ -234,11 +234,17 @@
           </div>
 
           <!-- 统一追踪列表 -->
-          <div v-for="t in unifiedTrackers" :key="t.tracker_id" class="form-tracker-item">
-            <div class="form-tracker-header">
+          <div v-for="t in unifiedTrackers" :key="t.tracker_id"
+               :class="['form-tracker-item', { expanded: expandedTrackerId === t.tracker_id }]">
+            <div class="form-tracker-header"
+                 :class="{ clickable: t.type === 'online_form' }"
+                 @click="toggleTrackerExpand(t)">
               <span class="form-tracker-name">
                 <span :class="['type-badge', t.type]">{{ typeLabel(t.type) }}</span>
                 {{ t.title }}
+                <span v-if="t.type === 'online_form'" class="expand-chevron">
+                  {{ expandedTrackerId === t.tracker_id ? '▾' : '▸' }}
+                </span>
               </span>
               <span :class="['form-progress-badge', t.status]">
                 {{ t.progress.filled }}/{{ t.progress.total }}
@@ -269,9 +275,71 @@
               </div>
             </div>
 
-            <div class="form-tracker-actions">
-              <button class="form-btn small" @click="checkTracker(t)">检测</button>
-              <button class="form-btn small info" v-if="t.type === 'online_form'" @click="openOnlineFormFiller(t.source_id)">查看/填写表格</button>
+            <!-- 展开的表格详情 -->
+            <div class="form-tracker-detail" v-if="expandedTrackerId === t.tracker_id && t.type === 'online_form'">
+              <div v-if="expandLoading" class="detail-loading">加载中...</div>
+              <div v-else-if="expandError" class="detail-error">{{ expandError }}</div>
+              <template v-else-if="expandFormData">
+                <div class="detail-scroll">
+                  <table class="detail-table">
+                    <thead>
+                      <tr>
+                        <th v-for="col in expandFormData.columns" :key="col.key">
+                          {{ col.label }}
+                          <span v-if="col.required" class="required-mark">*</span>
+                        </th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in expandFormData.rows" :key="row.id">
+                        <td v-for="col in expandFormData.columns" :key="col.key">
+                          <template v-if="col.type === 'name'">
+                            {{ row.data[col.key] || row.member_name }}
+                          </template>
+                          <template v-else-if="editingRowId === row.id">
+                            <input v-if="col.type === 'text'"
+                                   v-model="editData[col.key]" class="cell-input" />
+                            <input v-else-if="col.type === 'number'"
+                                   v-model="editData[col.key]" type="number" class="cell-input" />
+                            <input v-else-if="col.type === 'date'"
+                                   v-model="editData[col.key]" type="date" class="cell-input" />
+                            <select v-else-if="col.type === 'select'"
+                                    v-model="editData[col.key]" class="cell-input">
+                              <option value="">请选择</option>
+                              <option v-for="opt in col.options" :key="opt" :value="opt">{{ opt }}</option>
+                            </select>
+                          </template>
+                          <template v-else>
+                            {{ row.data[col.key] || '-' }}
+                          </template>
+                        </td>
+                        <td>
+                          <span :class="['detail-status', row.filled ? 'done' : 'pending']">
+                            {{ row.filled ? '✓ 已填' : '待填' }}
+                          </span>
+                        </td>
+                        <td>
+                          <button v-if="editingRowId !== row.id" @click="startInlineEdit(row)" class="row-btn">
+                            {{ row.filled ? '修改' : '填写' }}
+                          </button>
+                          <template v-else>
+                            <button @click="saveInlineEdit(row, t)" class="row-btn save">保存</button>
+                            <button @click="cancelInlineEdit" class="row-btn cancel">取消</button>
+                          </template>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="detail-footer">
+                  <button @click="refreshInlineForm(t)" class="row-btn">🔄 刷新检测</button>
+                </div>
+              </template>
+            </div>
+
+            <div class="form-tracker-actions" @click.stop>
               <button class="form-btn small ai" v-if="t.type === 'online_form'" @click="aiSummaryTracker(t)">🤖 AI总结</button>
               <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0">@催办</button>
               <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
@@ -788,6 +856,13 @@ const trackersChecking = ref(false)
 const showFormCreator = ref(false)
 const formFillerVisible = ref(false)
 const formFillerId = ref(null)
+// ===== Inline expandable form detail =====
+const expandedTrackerId = ref(null)
+const expandFormData = ref(null)
+const expandLoading = ref(false)
+const expandError = ref('')
+const editingRowId = ref(null)
+const editData = ref({})
 const groupChatsForCreator = ref([])
 // AI 总结弹窗
 const aiSummaryVisible = ref(false)
@@ -838,6 +913,10 @@ const handleFormCreated = async (data) => {
     await loadUnifiedTrackers()
     activeTab.value = 'forms'
     alert(res.data.message || '创建成功')
+    // 表格创建后已在群聊发送消息，通知父组件刷新对应会话
+    if (data.payload && data.payload.contact_id) {
+      emit('message-sent', { contact_id: data.payload.contact_id })
+    }
   } catch (e) {
     alert('创建失败: ' + (e.response?.data?.detail || e.message))
   }
@@ -848,6 +927,65 @@ const openOnlineFormFiller = (formId) => {
   formFillerVisible.value = true
 }
 
+const loadExpandForm = async (t) => {
+  expandLoading.value = true
+  expandError.value = ''
+  expandFormData.value = null
+  try {
+    const res = await onlineFormsApi.get(t.source_id)
+    expandFormData.value = res.data
+  } catch (e) {
+    expandError.value = '加载失败: ' + (e.response?.data?.detail || e.message)
+  }
+  expandLoading.value = false
+}
+
+const toggleTrackerExpand = (t) => {
+  if (t.type !== 'online_form') return
+  if (expandedTrackerId.value === t.tracker_id) {
+    // collapse
+    expandedTrackerId.value = null
+    expandFormData.value = null
+    expandError.value = ''
+    editingRowId.value = null
+    editData.value = {}
+  } else {
+    expandedTrackerId.value = t.tracker_id
+    loadExpandForm(t)
+  }
+}
+
+const startInlineEdit = (row) => {
+  editingRowId.value = row.id
+  editData.value = { ...row.data }
+}
+
+const cancelInlineEdit = () => {
+  editingRowId.value = null
+  editData.value = {}
+}
+
+const saveInlineEdit = async (row, t) => {
+  try {
+    await onlineFormsApi.fill(t.source_id, row.member_name, editData.value, row.member_user_id)
+    await loadExpandForm(t)
+    cancelInlineEdit()
+    await loadUnifiedTrackers()
+  } catch (e) {
+    alert('保存失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const refreshInlineForm = async (t) => {
+  try {
+    await onlineFormsApi.check(t.source_id)
+    await loadExpandForm(t)
+    await loadUnifiedTrackers()
+  } catch (e) {
+    alert('刷新失败')
+  }
+}
+
 const onTodoClick = (todo) => {
   // 优先：带有在线表格的待办 → 打开填写面板
   if (todo.form_id) {
@@ -856,21 +994,6 @@ const onTodoClick = (todo) => {
   }
   // 否则：跳转到对应消息/邮件（v3.4 待办点击跳转）
   handleTodoClick(todo)
-}
-
-const checkTracker = async (t) => {
-  try {
-    if (t.type === 'online_form') {
-      await onlineFormsApi.check(t.source_id)
-    } else if (t.type === 'file_collection') {
-      const { fileCollectionApi } = await import('../api')
-      await fileCollectionApi.scanProgress(t.source_id)
-    } else {
-      const { formsApi } = await import('../api')
-      await formsApi.check(t.tracker_id)
-    }
-    await loadUnifiedTrackers()
-  } catch (e) {}
 }
 
 const remindTracker = async (t) => {
@@ -1828,6 +1951,88 @@ const checkAllTrackers = async () => {
 .form-member-empty { color: #9ca3af; font-size: 12px; }
 .form-tracker-meta { color: #9ca3af; font-size: 11px; margin-top: 4px; }
 .form-tracker-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+/* ===== Inline expandable form detail ===== */
+.form-tracker-header.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+.form-tracker-header.clickable:hover .form-tracker-name {
+  color: #4b8cff;
+}
+.form-tracker-item.expanded {
+  border-color: #4b8cff;
+  background: #f7f9ff;
+}
+.expand-chevron {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-left: 2px;
+}
+.form-tracker-detail {
+  margin-top: 10px;
+  border-top: 1px dashed #d0dbf0;
+  padding-top: 10px;
+}
+.detail-loading, .detail-error {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 8px 4px;
+}
+.detail-error { color: #ef4444; }
+.detail-scroll {
+  overflow-x: auto;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.detail-table th {
+  background: #f0f4ff;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #d0dbf0;
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+.detail-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f0f2f8;
+  color: #444;
+  white-space: nowrap;
+}
+.required-mark { color: #ef4444; }
+.detail-status { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+.detail-status.done { background: #d1fae5; color: #065f46; }
+.detail-status.pending { background: #fef3c7; color: #92400e; }
+.cell-input {
+  width: 100%;
+  min-width: 80px;
+  padding: 4px 6px;
+  border: 1px solid #4b8cff;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.row-btn {
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #f8f9fc;
+  cursor: pointer;
+  font-size: 11px;
+  margin-right: 4px;
+}
+.row-btn.save { background: #667eea; color: #fff; border-color: #667eea; }
+.row-btn.cancel { background: #fee; color: #c33; }
+.detail-footer { margin-top: 8px; display: flex; justify-content: flex-end; }
 
 /* ===== Todo click + jump styles ===== */
 .todo-item.clickable {

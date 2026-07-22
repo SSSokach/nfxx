@@ -43,6 +43,17 @@
                 :disabled="message.detecting"
               >{{ message.detecting ? '检测中...' : (message.file_collected ? '已生成待办 ✓' : '📋 生成待办') }}</button>
             </template>
+            <template v-else-if="message.message_type === 'online_form' && message.form_id">
+              <div class="form-msg-text">{{ message.content }}</div>
+              <div class="form-msg-card" @click="openFormMessage(message)">
+                <div class="form-msg-card-icon">📋</div>
+                <div class="form-msg-card-body">
+                  <div class="form-msg-card-title">在线表格</div>
+                  <div class="form-msg-card-desc">点击卡片填写表格</div>
+                </div>
+                <div class="form-msg-card-btn">填写</div>
+              </div>
+            </template>
             <template v-else>
               {{ message.content }}
             </template>
@@ -322,7 +333,7 @@ const props = defineProps({
   highlightMessageId: { type: [Number, null], default: null }
 });
 
-const emit = defineEmits(['message-sent', 'ai-chat', 'todo-created', 'add-todo', 'scroll-to-message']);
+const emit = defineEmits(['message-sent', 'ai-chat', 'todo-created', 'add-todo', 'scroll-to-message', 'open-form']);
 
 const messages = ref([]);
 const inputMessage = ref('');
@@ -417,6 +428,10 @@ const previewFile = async (fileId) => {
 // ===== 文件收集检测 =====
 const isExcelFile = (fileName) => {
   return fileName && fileName.match(/\.(xlsx|xls)$/i);
+};
+
+const openFormMessage = (message) => {
+  if (message.form_id) emit('open-form', message.form_id);
 };
 
 const detectFileCollection = async (message) => {
@@ -1575,6 +1590,57 @@ watch(() => props.highlightMessageId, async (msgId) => {
   border-color: #16a34a;
   color: #16a34a;
   cursor: default;
+}
+
+/* ===== Online Form message card ===== */
+.form-msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+}
+.form-msg-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f5f7ff, #eef2ff);
+  cursor: pointer;
+  transition: all 0.15s;
+  max-width: 320px;
+}
+.form-msg-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 2px 10px rgba(102, 126, 234, 0.18);
+  transform: translateY(-1px);
+}
+.form-msg-card-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.form-msg-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.form-msg-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.form-msg-card-desc {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+.form-msg-card-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: #667eea;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* ===== Highlighted message (jump from todo) ===== */

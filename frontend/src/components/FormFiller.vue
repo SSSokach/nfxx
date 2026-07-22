@@ -71,7 +71,6 @@
 
       <div class="filler-footer">
         <button @click="refresh" class="btn-refresh">🔄 刷新检测</button>
-        <button @click="remind" class="btn-remind" v-if="unfilledCount > 0">@ 催办未填 ({{ unfilledCount }})</button>
         <button @click="close" class="btn-close">关闭</button>
       </div>
     </div>
@@ -102,9 +101,6 @@ export default {
       const total = this.rows.length
       const filled = this.rows.filter(r => r.filled).length
       return { total, filled, percent: total ? Math.round(filled / total * 100) : 0 }
-    },
-    unfilledCount() {
-      return this.rows.filter(r => !r.filled).length
     },
   },
   watch: {
@@ -147,19 +143,15 @@ export default {
     },
     async refresh() {
       try {
-        await onlineFormsApi.check(this.formId)
-        await this.load()
-        this.$emit('refresh')
+        await onlineFormsApi.check(this.formId);
+        await this.load();
+        this.$emit('refresh');
       } catch (e) {
-        alert('刷新失败')
+        alert('刷新失败');
       }
     },
-    remind() {
-      const unfilled = this.rows.filter(r => !r.filled).map(r => r.member_name).join(', ')
-      alert(`已催办: ${unfilled}`)
-    },
     close() {
-      this.$emit('close')
+      this.$emit('close');
     },
   },
 }
@@ -189,8 +181,7 @@ export default {
 .row-btn.save { background: #667eea; color: #fff; border-color: #667eea; }
 .row-btn.cancel { background: #fee; color: #c33; }
 .filler-footer { padding: 14px 24px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
-.btn-refresh, .btn-remind, .btn-close { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; border: 1px solid #ddd; }
+.btn-refresh, .btn-close { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; border: 1px solid #ddd; }
 .btn-refresh { background: #f8f9fc; }
-.btn-remind { background: #fff3cd; border-color: #ffc107; color: #856404; }
 .btn-close { background: #f5f5f5; }
 </style>

@@ -130,20 +130,16 @@ def _sync_tracker(db: Session, form: OnlineForm):
 
 def _create_todos_for_members(db: Session, form: OnlineForm, tracker: FormTracker,
                               initiator: User, members: List[str]):
-    """为每个待填写人生成待办（自动跳过发起人自己）。
+    """为每个待填写人生成 [填写表格] 待办。
 
-    注意：这里只创建 [填写表格] 待办（别人让我填的）。
-    发起人的追踪进度通过 "表格追踪" tab 的 FormTracker 单独展示，
-    不再写入 ChatTodoItem（避免待办和追踪混在一起）。
+    若发起人自己也在待填写人名单中，同样为其创建待办（自己也需要填写）。
+    发起人的追踪进度另由 "表格追踪" tab 的 FormTracker 展示。
     """
     existing_contents = {t.content for t in db.query(ChatTodoItem).filter(
         ChatTodoItem.source_type == "group",
         ChatTodoItem.group_name == tracker.form_name,
     ).all()}
     for name in members:
-        # 跳过发起人自己 —— 发起人不需要填写，只需在"表格追踪"tab 追踪
-        if name == initiator.name:
-            continue
         user = db.query(User).filter(User.name == name).first()
         if not user:
             continue
@@ -203,6 +199,34 @@ def _complete_member_todo(db: Session, form: OnlineForm, member_name: str):
         t.status = "completed"
         t.completed_at = datetime.utcnow()
     db.commit()
+
+
+def _send_form_message_to_chat(db: Session, form: OnlineForm, creator: User,
+                               required_members: List[str]):
+    """在表格所在群聊中发送一条「在线表格」消息，并 @所有需要填写的人员。
+
+    消息 message_type=online_form，并携带 form_id，前端据此渲染为可点击的表格卡片。
+    @mention 范围：所有待填写人员（若发起人自己也需填写，则一并 @自己）。
+    """
+    # @mention 所有待填写人（含发起人自己，若其也需要填写）
+    at_mentions = " ".join(f"@{m}" for m in required_members)
+    deadline_str = f"\n📅 截止日期：{form.deadline.isoformat()}" if form.deadline else ""
+    content = (
+        f"{at_mentions} 请填写表格《{form.title}》"
+        f"\n📋 点击下方卡片即可在线填写{deadline_str}"
+    )
+    msg = Message(
+        sender_id=creator.id,
+        contact_id=form.contact_id,
+        content=content,
+        message_type="online_form",
+        form_id=form.id,
+        created_at=datetime.utcnow(),
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
 
 
 # ============ 路由 ============
@@ -267,13 +291,20 @@ def create_form(req: CreateFormRequest, db: Session = Depends(get_db)):
     # 为待填写人生成待办
     _create_todos_for_members(db, form, tracker, creator, req.required_members)
 
+    # 在群聊中发送表格消息并 @需要填写的人员
+    sent_msg = None
+    if req.send_message:
+        sent_msg = _send_form_message_to_chat(db, form, creator, req.required_members)
+
     return {
         "form_id": form.id,
         "tracker_id": tracker.id,
         "title": form.title,
         "columns": cols,
         "required_members": req.required_members,
-        "message": f"表格已创建，已为 {len(req.required_members)} 人生成待办",
+        "message_id": sent_msg.id if sent_msg else None,
+        "message": f"表格已创建，已为 {len(req.required_members)} 人生成待办，"
+                   + ("已在群聊发送表格消息" if sent_msg else ""),
     }
 
 
@@ -756,6 +787,7 @@ class CreateFromExcelRequest(BaseModel):
     file_id: int  # 已上传的 Excel 文件 ID
     title: Optional[str] = None  # 表格标题，不填则用文件名
     deadline: Optional[str] = None
+    send_message: bool = True  # 是否在群聊中发送表格消息并自动追踪
 
 
 @router.post("/create-from-excel")
@@ -890,6 +922,11 @@ def create_from_excel(req: CreateFromExcelRequest, db: Session = Depends(get_db)
     # 更新发起人待办进度
     _update_initiator_todo(db, form, tracker)
 
+    # 在群聊中发送表格消息并 @需要填写的人员
+    sent_msg = None
+    if req.send_message:
+        sent_msg = _send_form_message_to_chat(db, form, creator, required_members)
+
     return {
         "form_id": form.id,
         "tracker_id": tracker.id,
@@ -898,8 +935,10 @@ def create_from_excel(req: CreateFromExcelRequest, db: Session = Depends(get_db)
         "required_members": required_members,
         "pre_filled_count": len(filled_names),
         "unfilled_count": len(unfilled_members),
+        "message_id": sent_msg.id if sent_msg else None,
         "message": f"已从 Excel 创建表格，识别到 {len(required_members)} 人，"
-                   f"其中 {len(filled_names)} 人已填写，{len(unfilled_members)} 人待填写（已生成待办）",
+                   f"其中 {len(filled_names)} 人已填写，{len(unfilled_members)} 人待填写（已生成待办）"
+                   + ("，已在群聊发送表格消息" if sent_msg else ""),
     }
 
 

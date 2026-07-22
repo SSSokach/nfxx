@@ -32,6 +32,7 @@ class Message(Base):
     content = Column(Text)
     message_type = Column(String, default="text")
     file_id = Column(Integer, ForeignKey("files.id"), nullable=True)
+    form_id = Column(Integer, nullable=True)  # 关联在线表格（无外键约束，便于跨表查询）
     reply_to_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     sender = relationship("User", backref="messages")

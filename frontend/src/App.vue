@@ -22,6 +22,7 @@
               @ai-chat="handleAiChat"
               @todo-created="handleTodoCreated"
               @scroll-to-message="handleScrollToMessage"
+              @open-form="handleOpenForm"
             />
           </div>
         </template>
@@ -69,6 +70,14 @@
           />
         </transition>
 
+        <!-- Form Filler Modal (triggered from chat form card) -->
+        <FormFiller
+          :visible="formFillerVisible"
+          :formId="formFillerId"
+          @close="formFillerVisible = false"
+          @refresh="handleFormFillerRefresh"
+        />
+
         <!-- Floating AI button (draggable + edge-hide, independent of view) -->
         <div
           v-if="!aiPanelVisible"
@@ -99,6 +108,7 @@ import ChatArea from './components/ChatArea.vue'
 import EmailList from './components/EmailList.vue'
 import EmailDetail from './components/EmailDetail.vue'
 import AIPanel from './components/AIPanel.vue'
+import FormFiller from './components/FormFiller.vue'
 import { emailsApi, chatsApi } from './api'
 
 const currentUserId = ref(1)
@@ -112,6 +122,8 @@ const aiPanelVisible = ref(false)
 const aiPanelOpenKey = ref(0)
 const highlightMessageId = ref(null)
 const jumpToEmailId = ref(null)
+const formFillerVisible = ref(false)
+const formFillerId = ref(null)
 
 // ===== Floating AI button: draggable + edge-hide =====
 const aiFabRef = ref(null)
@@ -429,6 +441,21 @@ const handleJumpCompleted = () => {
 
 const handleScrollToMessage = (msgId) => {
   highlightMessageId.value = msgId
+}
+
+const handleOpenForm = (formId) => {
+  if (!formId) return
+  formFillerId.value = formId
+  formFillerVisible.value = true
+}
+
+const handleFormFillerRefresh = () => {
+  // 填写后刷新当前会话消息与待办列表
+  if (selectedContact.value && chatAreaRef.value) {
+    chatAreaRef.value.loadMessages()
+  }
+  refreshKey.value++
+  todoRefreshKey.value++
 }
 </script>
 

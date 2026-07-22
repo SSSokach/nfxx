@@ -88,6 +88,7 @@ def get_messages(user_id: int, contact_id: int, db: Session = Depends(get_db)):
             "content": msg.content,
             "message_type": msg.message_type,
             "file_id": msg.file_id,
+            "form_id": msg.form_id,
             "file_name": msg.file.name if msg.file else "",
             "file_collected": file_collected,
             "created_at": msg.created_at.isoformat(),
