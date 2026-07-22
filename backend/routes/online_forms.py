@@ -604,12 +604,9 @@ def delete_form(form_id: int, db: Session = Depends(get_db)):
 def ai_summary_form(form_id: int, db: Session = Depends(get_db)):
     """AI 总结表格填写情况。
 
-    返回结构化总结：
-    - 整体进度
-    - 未填写人名单
-    - 部分填写人及其缺失列
-    - 已填写人的完成度
-    - 建议
+    返回简化的两段式总结：
+    - 异常填写检测（填写内容与他人/要求不一致、必填列缺失；无异常则输出"无"）
+    - 跟进建议
     """
     form = db.query(OnlineForm).filter(OnlineForm.id == form_id).first()
     if not form:
@@ -677,41 +674,77 @@ def ai_summary_form(form_id: int, db: Session = Depends(get_db)):
     percent = round(truly_filled_count / total * 100, 1) if total else 0
 
     deadline_str = form.deadline.isoformat() if form.deadline else "无截止日期"
-    col_labels = [c["label"] for c in columns if c.get("type") != "name"]
+
+    # 列定义（供 AI 判断填写是否符合要求）
+    col_defs = []
+    for col in editable_cols:
+        parts = [f"{col.get('label', col.get('key'))}", f"类型:{col.get('type', 'text')}"]
+        if col.get('options'):
+            parts.append(f"可选值:{'/'.join(col['options'])}")
+        if col.get('required'):
+            parts.append('必填')
+        col_defs.append('（' + '，'.join(parts) + '）')
+
+    # 各人实际填写值（供 AI 检测内容异常与不一致）
+    values_lines = []
+    for name in required:
+        info = member_data.get(name)
+        if not info:
+            values_lines.append(f"- {name}：未填写（无任何数据）")
+            continue
+        cells = []
+        for col in editable_cols:
+            val = info["data"].get(col["key"], "")
+            val_str = str(val).strip() if val and str(val).strip() else "（空）"
+            cells.append(f"{col.get('label', col.get('key'))}={val_str}")
+        values_lines.append(f"- {name}：" + "；".join(cells))
 
     # 构造 AI prompt
     prompt = f"""你是办公助手的AI分析模块。请根据以下在线表格的填写数据，生成一份简洁的填写情况总结报告。
 
 表格标题：{form.title}
 截止日期：{deadline_str}
-表格列（共{len(editable_cols)}列）：{', '.join(col_labels)}
 应填写人数：{total} 人
-已全部填写完的人数：{truly_filled_count} 人
-未完成填写的人数：{unfilled_count} 人
-完成率：{percent}%
+完成率：{percent}%（已全部填完 {truly_filled_count} 人，未完成 {unfilled_count} 人）
 
-各人填写详情：
-{chr(10).join(detail_lines)}
+列定义：{'; '.join(col_defs)}
 
-请生成总结报告，要求：
-1. 用简明扼要的语言概括整体进度（完成率、多少人完成、多少人未完成）
-2. 重点列出"部分填写"的人员，明确说明他们已填了哪些列、还缺哪些列未填
-3. 列出完全未填写的人员
-4. 给出 1-2 条跟进建议（如重点催办谁、关注哪些缺失列、截止日期提醒等）
-5. 语气专业、简洁，用中文，总字数控制在 250 字以内
+各人实际填写值：
+{chr(10).join(values_lines)}
+
+请严格按以下模板输出，只包含两个部分，不要输出整体进度等其他内容。
+格式要求：每条异常的格式必须保持一致，统一采用“姓名：问题描述”的句式；语言尽量简约，直奔重点，不赘述、不重复。
+
+**1. 异常填写检测**
+逐条列出填写异常，每条统一格式为“姓名：问题”。重点检测：
+- 填写内容与大多数人不一致（如：姓名：某列填了X，与多数人的Y不一致）
+- 与列要求或可选值不符（如：姓名：某列填写不符合要求）
+- 关键必填列未填写（如：姓名：未填写某列）
+若均无异常，本部分只输出“无”。
+
+**2. 跟进建议**
+逐条给出具体跟进动作，每条一两句话，指明通知谁、完成什么、截止时间。若所有人填写均无异常，本部分只输出“无需额外跟进”。
+
+要求：语气专业，用中文，语言简约，总字数控制在 150 字以内。
 """
 
     try:
         import glm_ai
         summary = glm_ai._ai_call(prompt, expect_json=False)
     except Exception as e:
-        # AI 调用失败时返回结构化兜底
-        summary = (
-            f"📊 {form.title} 填写情况：\n"
-            f"完成率 {percent}%（{filled_count}/{total}）\n"
-            f"未填写 {unfilled_count} 人\n\n"
-            + "\n".join(detail_lines)
-        )
+        # AI 调用失败时返回简化兜底（两段式）
+        if unfilled_count:
+            summary = (
+                "1. 异常填写检测\n"
+                + "\n".join(detail_lines)
+                + f"\n\n2. 跟进建议\n"
+                + f"请立即通知未完成填写的人员，限期在截止日期（{deadline_str}）前完成填写，避免延误整体汇总。"
+            )
+        else:
+            summary = (
+                "1. 异常填写检测\n无\n\n"
+                "2. 跟进建议\n全部人员已按要求完成填写，无需额外跟进。"
+            )
 
     return {
         "ok": True,

@@ -340,7 +340,7 @@
             </div>
 
             <div class="form-tracker-actions" @click.stop>
-              <button class="form-btn small ai" v-if="t.type === 'online_form'" @click="aiSummaryTracker(t)">🤖 AI总结</button>
+              <button class="form-btn small ai" v-if="t.type === 'online_form'" @click="aiSummaryTracker(t)">🤖 进展汇总</button>
               <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0">@催办</button>
               <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
             </div>
@@ -371,7 +371,7 @@
     <div class="ai-summary-overlay" v-if="aiSummaryVisible" @click.self="aiSummaryVisible = false">
       <div class="ai-summary-modal">
         <div class="ai-summary-header">
-          <h3>🤖 AI 填写情况总结</h3>
+          <h3>🤖 进展汇总</h3>
           <button class="ai-summary-close" @click="aiSummaryVisible = false">×</button>
         </div>
         <div class="ai-summary-body">
