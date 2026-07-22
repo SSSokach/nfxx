@@ -5,11 +5,29 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from dependencies import get_db
 from models import Email, EmailTodoItem, EmailTracker, File, User
+import re
 from datetime import datetime
 from typing import Optional, List
 import glm_ai
 
 router = APIRouter()
+
+
+def _extract_recipient_names(to_str):
+    """从收件人字符串中提取姓名列表，支持 '姓名 <email>' 或纯姓名，多个收件人用逗号/分号分隔。"""
+    if not to_str:
+        return []
+    names = []
+    for part in re.split(r'[,;]', to_str):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r'^(.+?)\s*<.+@.+>$', part)
+        if m:
+            names.append(m.group(1).strip())
+        elif '@' not in part:
+            names.append(part)
+    return names
 
 
 def _parse_deadline(deadline_str):
@@ -148,6 +166,32 @@ def send_email(user_id: int, req: SendEmailRequest, db: Session = Depends(get_db
     db.add(email)
     db.commit()
     db.refresh(email)
+
+    # 为收件人创建收件箱副本，使收件人能在收件箱中看到该邮件
+    recipient_names = _extract_recipient_names(req.to)
+    if recipient_names:
+        recipients = db.query(User).filter(User.name.in_(recipient_names)).all()
+        for r in recipients:
+            if r.id == user_id:
+                continue  # 跳过发件人自己
+            inbox_email = Email(
+                user_id=r.id,
+                subject=email.subject,
+                sender=sender_str,
+                sender_dept=sender_dept,
+                recipients=req.to,
+                content=req.content,
+                is_reply=False,
+                reply_to_email_id=None,
+                sent_at=email.sent_at,
+                created_at=email.created_at,
+                folder="inbox",
+                body_type=email.body_type,
+                attachment_file_ids=attachment_ids_str,
+            )
+            db.add(inbox_email)
+        db.commit()
+
     return {
         "id": email.id,
         "folder": email.folder,

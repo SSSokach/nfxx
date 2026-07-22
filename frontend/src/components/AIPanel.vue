@@ -398,10 +398,6 @@
             <!-- AI 总结文本 -->
             <div class="summary-text" v-html="renderMarkdown(aiSummaryData.summary)"></div>
             <!-- 详细明细 -->
-            <div class="summary-details" v-if="aiSummaryData.details && aiSummaryData.details.length">
-              <div class="details-title">📋 逐人明细</div>
-              <div v-for="(line, i) in aiSummaryData.details" :key="i" class="detail-line">{{ line }}</div>
-            </div>
           </template>
         </div>
       </div>
