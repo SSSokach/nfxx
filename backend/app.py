@@ -55,6 +55,7 @@ def _run_lightweight_migration():
         ("emails", "body_type", "body_type VARCHAR DEFAULT 'text'"),
         ("emails", "attachment_file_ids", "attachment_file_ids TEXT DEFAULT ''"),
         ("candidate_todo", "source_email_id", "source_email_id INTEGER"),
+        ("chat_todo_item", "form_id", "form_id INTEGER"),
     ]
     with engine.begin() as conn:
         for table, column, ddl in migrations:
