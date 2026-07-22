@@ -5,11 +5,13 @@
 ## 技术栈
 
 ### 前端
+
 - Vue 3 + Vite
 - Axios（HTTP请求）
 - Marked（Markdown渲染）
 
 ### 后端
+
 - FastAPI
 - SQLAlchemy（ORM）
 - SQLite（数据库）
@@ -57,6 +59,7 @@ nfxx/
 ## 功能特性
 
 ### 聊天功能
+
 - ✅ 联系人/群组列表展示
 - ✅ 消息收发（文本）
 - ✅ Markdown文件上传、预览和编辑
@@ -64,6 +67,7 @@ nfxx/
 - ✅ 右键菜单：复制/回复/转发/收藏/AI对话/多选
 
 ### 邮箱功能（新增）
+
 - ✅ 左上角视图切换按钮（💬 消息 / ✉️ 邮箱）
 - ✅ 收件箱 / 已发送 / 写邮件 三个模块
 - ✅ 邮件内容支持 Markdown 与纯文本两种格式
@@ -74,6 +78,7 @@ nfxx/
 - ✅ 加入待办直接进入正式待办列表（不经过候选阶段）
 
 ### AI助手功能
+
 - ✅ 读取当前用户与联系人的聊天记录
 - ✅ 替当前用户向联系人发送消息
 - ✅ 获取在线文件内容
@@ -82,6 +87,7 @@ nfxx/
 - ✅ 工具注册机制，支持后续复杂功能扩展
 
 ### 待办功能（消息+邮件合并）
+
 - ✅ 候选待办（顶部）+ 正式待办（底部）双栏布局
 - ✅ AI 扫描：同时扫描消息与邮件，将新增内容加入候选待办
 - ✅ 候选待办确认：邮件候选确认 → 创建 EmailTodoItem；消息候选确认 → 创建 ChatTodoItem
@@ -133,15 +139,7 @@ cd backend
 python3 -m uvicorn app:app --reload --host 0.0.0.0 --port 18000
 ```
 
-或使用启动脚本：
-
-```bash
-./start.sh      # 后台启动，PID 写入 nohup.pid，日志输出到 backend.log
-./restart.sh    # 重启服务
-```
-
-后端服务将在 `http://localhost:18000` 运行，支持代码热更新。
-首次启动时会自动执行轻量级 DB 迁移（为已有表添加 folder / body_type / attachment_file_ids / source_email_id 等列）。
+<br />
 
 ### 启动前端开发服务器
 
@@ -207,21 +205,25 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 ## API接口
 
 ### 用户管理
+
 - `GET /api/users` - 获取所有用户
 - `GET /api/users/{user_id}` - 获取单个用户
 
 ### 聊天管理
+
 - `GET /api/chats/contacts/{user_id}` - 获取联系人列表
 - `GET /api/chats/messages?user_id=&contact_id=` - 获取消息列表
 - `POST /api/chats/send?user_id=&contact_id=&content=` - 发送消息
 
 ### 文件管理
+
 - `GET /api/files/{user_id}` - 获取文件列表
 - `GET /api/files/content/{file_id}` - 获取文件内容
 - `POST /api/files/save` - 保存文件
 - `PUT /api/files/update/{file_id}` - 更新文件
 
 ### 邮件管理（新增）
+
 - `GET /api/emails/list/{user_id}?folder=inbox|sent|draft` - 获取邮件列表（支持按文件夹过滤）
 - `GET /api/emails/detail/{email_id}` - 获取邮件详情（含附件内容）
 - `POST /api/emails/send/{user_id}` - 发送新邮件（body: `{to, subject, content, body_type, attachment_file_ids}`）
@@ -231,6 +233,7 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 - `PUT /api/emails/todos/{todo_id}?action=complete|delete|restore|extend` - 更新邮件待办状态
 
 ### 待办管理
+
 - `POST /api/todos/scan-messages/{user_id}` - 扫描消息生成摘要/待办
 - `GET /api/todos/chat-todos/{user_id}?status=pending|completed|deleted` - 获取消息待办
 - `PUT /api/todos/chat-todos/{todo_id}?action=complete|delete|restore|extend` - 更新消息待办
@@ -241,6 +244,7 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 - `POST /api/todos/candidates/{candidate_id}/dismiss` - 忽略候选
 
 ### AI助手
+
 - `GET /api/ai/tools` - 获取可用工具列表
 - `POST /api/ai/call_tool` - 调用工具
 - `POST /api/ai/chat` - AI聊天接口（支持 skill 路由，含邮件摘要 skill）
@@ -255,3 +259,4 @@ python3 -m uvicorn app:app --host 0.0.0.0 --port 18000
 - `list_files` - 列出当前用户的所有文件
 - `list_contacts` - 列出当前用户的所有联系人
 - 邮件右键 → AI对话 → 在输入框输入"总结这封邮件" - 触发邮件摘要 skill
+
