@@ -20,13 +20,20 @@
         <div class="compose-field">
           <label>收件人</label>
           <div class="recipient-picker">
+            <div class="recipient-tags" v-if="selectedRecipients.length">
+              <span v-for="(r, i) in selectedRecipients" :key="i" class="recipient-tag">
+                {{ r.name }}
+                <span class="recipient-tag-remove" @mousedown.prevent="removeRecipient(i)">×</span>
+              </span>
+            </div>
             <input
               type="text"
-              v-model="form.to"
-              placeholder="点击下拉选择或手动输入"
+              v-model="recipientInput"
+              placeholder="点击下拉选择或手动输入，支持多选"
               @focus="showRecipientDropdown = true"
               @blur="hideRecipientDropdown"
               @input="filterRecipients"
+              @keydown.enter.prevent="addManualRecipient"
             />
             <button type="button" class="recipient-toggle" @click="showRecipientDropdown = !showRecipientDropdown">▼</button>
             <div class="recipient-dropdown" v-if="showRecipientDropdown && filteredRecipients.length">
@@ -34,10 +41,12 @@
                 v-for="user in filteredRecipients"
                 :key="user.id"
                 class="recipient-option"
+                :class="{ 'already-selected': isRecipientSelected(user) }"
                 @mousedown.prevent="selectRecipient(user)"
               >
                 <span class="recipient-name">{{ user.name }}</span>
                 <span class="recipient-email">{{ user.email || user.name + '@company.com' }}</span>
+                <span v-if="isRecipientSelected(user)" class="recipient-check">✓</span>
               </div>
               <div v-if="filteredRecipients.length === 0" class="recipient-empty">无匹配联系人</div>
             </div>
@@ -205,7 +214,8 @@ const form = ref({
   subject: '',
   content: '',
   body_type: 'markdown',
-  attachment_file_ids: []
+  attachment_file_ids: [],
+  reply_to_email_id: null
 })
 
 const sending = ref(false)
@@ -214,12 +224,14 @@ const showFilePicker = ref(false)
 const previewAttachmentData = ref(null)
 const toast = ref({ visible: false, message: '' })
 
-// ===== 收件人下拉选择 =====
+// ===== 收件人下拉选择（多选） =====
 const userList = ref([])
 const showRecipientDropdown = ref(false)
-const recipientFilter = ref('')
+const recipientInput = ref('')
+const selectedRecipients = ref([])  // 已选收件人列表 [{name, email}]
+
 const filteredRecipients = computed(() => {
-  const keyword = (recipientFilter.value || form.value.to || '').trim().toLowerCase()
+  const keyword = recipientInput.value.trim().toLowerCase()
   const candidates = userList.value.filter(u => u.id !== props.currentUserId)
   if (!keyword) return candidates
   return candidates.filter(u =>
@@ -237,20 +249,53 @@ const loadUserList = async () => {
   }
 }
 
+const isRecipientSelected = (user) => {
+  const email = user.email || `${user.name}@company.com`
+  return selectedRecipients.value.some(r => r.email === email)
+}
+
 const selectRecipient = (user) => {
   const email = user.email || `${user.name}@company.com`
-  form.value.to = `${user.name} <${email}>`
-  showRecipientDropdown.value = false
-  recipientFilter.value = ''
+  if (!isRecipientSelected(user)) {
+    selectedRecipients.value.push({ name: user.name, email })
+  }
+  // 更新 form.to 为逗号分隔的字符串
+  form.value.to = selectedRecipients.value.map(r => `${r.name} <${r.email}>`).join(', ')
+  recipientInput.value = ''
+  showRecipientDropdown.value = true  // 保持打开，继续选
+}
+
+const removeRecipient = (index) => {
+  selectedRecipients.value.splice(index, 1)
+  form.value.to = selectedRecipients.value.map(r => `${r.name} <${r.email}>`).join(', ')
+}
+
+const addManualRecipient = () => {
+  const input = recipientInput.value.trim()
+  if (!input) return
+  // 解析手动输入的收件人（支持 "姓名 <email>" 或纯姓名）
+  const match = input.match(/^(.+?)\s*<(.+?)>$/)
+  if (match) {
+    const name = match[1].trim()
+    const email = match[2].trim()
+    if (!selectedRecipients.value.some(r => r.email === email)) {
+      selectedRecipients.value.push({ name, email })
+    }
+  } else {
+    // 纯姓名输入
+    if (!selectedRecipients.value.some(r => r.name === input)) {
+      selectedRecipients.value.push({ name: input, email: `${input}@company.com` })
+    }
+  }
+  form.value.to = selectedRecipients.value.map(r => `${r.name} <${r.email}>`).join(', ')
+  recipientInput.value = ''
 }
 
 const filterRecipients = () => {
-  recipientFilter.value = form.value.to
   showRecipientDropdown.value = true
 }
 
 const hideRecipientDropdown = () => {
-  // 延迟关闭，让 mousedown 选择能先触发
   setTimeout(() => { showRecipientDropdown.value = false }, 200)
 }
 
@@ -307,7 +352,9 @@ const previewAttachment = (att) => {
 }
 
 const cancelCompose = () => {
-  form.value = { to: '', subject: '', content: '', body_type: 'markdown', attachment_file_ids: [] }
+  form.value = { to: '', subject: '', content: '', body_type: 'markdown', attachment_file_ids: [], reply_to_email_id: null }
+  selectedRecipients.value = []
+  recipientInput.value = ''
   emit('compose-cancel')
 }
 
@@ -327,15 +374,23 @@ const sendEmail = async () => {
 
 const replyEmail = () => {
   if (!props.email) return
-  emit('compose-cancel') // 通知父组件切换到 compose
-  // 父组件需要将 composeMode 设为 true 后才能填充表单
+  emit('compose-cancel')
   setTimeout(() => {
+    // 解析发件人填入收件人列表
+    const senderStr = props.email.sender || ''
+    const match = senderStr.match(/^(.+?)\s*<(.+?)>$/)
+    if (match) {
+      selectedRecipients.value = [{ name: match[1].trim(), email: match[2].trim() }]
+    } else {
+      selectedRecipients.value = [{ name: senderStr, email: senderStr.includes('@') ? senderStr : `${senderStr}@company.com` }]
+    }
     form.value = {
-      to: props.email.sender,
+      to: selectedRecipients.value.map(r => `${r.name} <${r.email}>`).join(', '),
       subject: `Re: ${props.email.subject}`,
       content: `\n\n--- 原邮件 ---\n${props.email.content}`,
       body_type: props.email.body_type || 'markdown',
-      attachment_file_ids: []
+      attachment_file_ids: [],
+      reply_to_email_id: props.email.id  // 标记为回复邮件
     }
   }, 50)
 }
@@ -525,6 +580,40 @@ watch(() => showFilePicker.value, (v) => {
   text-align: center;
   color: #94a3b8;
   font-size: 12px;
+}
+.recipient-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+}
+.recipient-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #4338ca;
+}
+.recipient-tag-remove {
+  cursor: pointer;
+  font-size: 14px;
+  color: #818cf8;
+  line-height: 1;
+}
+.recipient-tag-remove:hover {
+  color: #ef4444;
+}
+.recipient-option.already-selected {
+  opacity: 0.5;
+}
+.recipient-check {
+  color: #22c55e;
+  font-size: 14px;
+  margin-left: 4px;
 }
 
 .body-type-row {

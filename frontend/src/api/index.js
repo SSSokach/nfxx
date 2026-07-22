@@ -73,7 +73,7 @@ export const todosApi = {
   convertToTodo: (todoId) => api.post(`/todos/chat-todos/${todoId}/convert`),
   createFromMessage: (userId, messageId) => api.post(`/todos/create-from-message/${userId}/${messageId}`),
   // 候选待办
-  scanCandidates: (userId) => api.post(`/todos/scan-candidates/${userId}`, {}, { timeout: 120000 }),
+  scanCandidates: (userId, emailOnly = false) => api.post(`/todos/scan-candidates/${userId}${emailOnly ? '?email_only=true' : ''}`, {}, { timeout: 120000 }),
   rescanEmails: (userId) => api.post(`/todos/rescan-emails/${userId}`),
   getCandidates: (userId) => api.get(`/todos/candidates/${userId}`),
   confirmCandidate: (candidateId) => api.post(`/todos/candidates/${candidateId}/confirm`),
@@ -83,15 +83,18 @@ export const todosApi = {
 export const emailsApi = {
   getList: (userId, folder) => api.get(`/emails/list/${userId}${folder ? `?folder=${folder}` : ''}`),
   getDetail: (emailId) => api.get(`/emails/detail/${emailId}`),
-  send: (userId, { to, subject, content, body_type = 'markdown', attachment_file_ids = [] }) =>
-    api.post(`/emails/send/${userId}`, { to, subject, content, body_type, attachment_file_ids }, { timeout: 30000 }),
+  send: (userId, { to, subject, content, body_type = 'markdown', attachment_file_ids = [], reply_to_email_id = null }) =>
+    api.post(`/emails/send/${userId}`, { to, subject, content, body_type, attachment_file_ids, reply_to_email_id }, { timeout: 30000 }),
   addToTodo: (userId, emailId) => api.post(`/emails/add-to-todo/${userId}/${emailId}`),
   scan: (userId) => api.post(`/emails/scan/${userId}`, {}, { timeout: 120000 }),
   getTodos: (userId, status) => api.get(`/emails/todos/${userId}${status ? `?status=${status}` : ''}`),
   updateTodo: (todoId, action) => api.put(`/emails/todos/${todoId}?action=${action}`),
   getTrackers: (userId) => api.get(`/emails/trackers/${userId}`),
   track: (emailId) => api.post(`/emails/track/${emailId}`),
-  checkTrackers: (userId) => api.post(`/emails/trackers/check/${userId}`, {}, { timeout: 120000 })
+  checkTrackers: (userId) => api.post(`/emails/trackers/check/${userId}`, {}, { timeout: 120000 }),
+  trackSent: (userId, emailId) => api.post(`/emails/track-sent/${userId}/${emailId}`),
+  deleteTracker: (trackerId) => api.delete(`/emails/trackers/${trackerId}`),
+  aiSummaryEmailTracker: (trackerId) => api.post(`/emails/trackers/${trackerId}/ai-summary`, {}, { timeout: 60000 }),
 }
 
 export const reportsApi = {

@@ -237,9 +237,10 @@
           <div v-for="t in unifiedTrackers" :key="t.tracker_id"
                :class="['form-tracker-item', { expanded: expandedTrackerId === t.tracker_id }]">
             <div class="form-tracker-header"
-                 :class="{ clickable: t.type === 'online_form' }"
-                 @click="toggleTrackerExpand(t)">
+                 :class="{ clickable: t.type === 'online_form' || t.type === 'email' }"
+                 @click="t.type === 'email' ? jumpToEmailTracker(t) : toggleTrackerExpand(t)">
               <span class="form-tracker-name">
+                <span class="tracker-type-icon">{{ t.type === 'email' ? '✉️' : '📊' }}</span>
                 <span :class="['type-badge', t.type]">{{ typeLabel(t.type) }}</span>
                 {{ t.title }}
                 <span v-if="t.type === 'online_form'" class="expand-chevron">
@@ -340,8 +341,9 @@
             </div>
 
             <div class="form-tracker-actions" @click.stop>
-              <button class="form-btn small ai" v-if="t.type === 'online_form'" @click="aiSummaryTracker(t)">🤖 进展汇总</button>
-              <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0">@催办</button>
+              <button class="form-btn small ai" v-if="t.type === 'online_form' || t.type === 'email'" @click="aiSummaryTracker(t)">🤖 进展汇总</button>
+              <button class="form-btn small info" v-if="t.type === 'email'" @click="jumpToEmailTracker(t)">📧 查看原邮件</button>
+              <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0 && t.type !== 'email'">@催办</button>
               <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
             </div>
           </div>
@@ -469,7 +471,7 @@ const activeTab = ref('chat')
 const tabs = [
   { key: 'chat', label: 'AI对话', icon: '💬' },
   { key: 'todo', label: '待办', icon: '📋' },
-  { key: 'forms', label: '表格追踪', icon: '📊' }
+  { key: 'forms', label: '事项跟踪', icon: '📊' }
 ]
 
 const currentUserLabel = computed(() => {
@@ -778,6 +780,13 @@ const handleTodoClick = (todo) => {
   }
 }
 
+// ===== Email tracker click → jump to email =====
+const jumpToEmailTracker = (t) => {
+  if (t.email_id) {
+    emit('jump-to-email', { email_id: t.email_id })
+  }
+}
+
 // ===== Candidate Todos =====
 const candidateTodos = ref([])
 const candidateScanning = ref(false)
@@ -813,7 +822,7 @@ const scanEmails = async () => {
   todoError.value = ''
   try {
     await todosApi.rescanEmails(props.currentUserId)
-    await todosApi.scanCandidates(props.currentUserId)
+    await todosApi.scanCandidates(props.currentUserId, true)  // email_only=true，只扫邮件不扫消息
     await loadCandidates()
   } catch (e) {
     todoError.value = '邮件扫描失败'
@@ -870,6 +879,7 @@ const typeLabel = (type) => ({
   online_form: '在线表格',
   file_collection: '文件收集',
   tracker_only: '追踪',
+  email: '邮件追踪',
 }[type] || '追踪')
 
 const loadUnifiedTrackers = async () => {
@@ -1016,8 +1026,14 @@ const aiSummaryTracker = async (t) => {
   aiSummaryLoading.value = true
   aiSummaryData.value = null
   try {
-    const res = await onlineFormsApi.aiSummary(t.source_id)
-    aiSummaryData.value = res.data
+    if (t.type === 'email') {
+      const { emailsApi } = await import('../api')
+      const res = await emailsApi.aiSummaryEmailTracker(t.source_id)
+      aiSummaryData.value = res.data
+    } else if (t.type === 'online_form') {
+      const res = await onlineFormsApi.aiSummary(t.source_id)
+      aiSummaryData.value = res.data
+    }
   } catch (e) {
     alert('AI 总结失败: ' + (e.response?.data?.detail || e.message))
     aiSummaryVisible.value = false
@@ -1026,14 +1042,17 @@ const aiSummaryTracker = async (t) => {
 }
 
 const deleteTracker = async (t) => {
-  if (!confirm(`确定要删除表格《${t.title}》吗？\n\n将一并删除：\n• 表格数据\n• 追踪记录\n• 关联的待办\n\n此操作不可恢复。`)) {
-    return
-  }
+  const confirmMsg = t.type === 'email' 
+    ? `确定要删除邮件追踪《${t.title}》吗？` 
+    : `确定要删除表格《${t.title}》吗？\n\n将一并删除：\n• 表格数据\n• 追踪记录\n• 关联的待办\n\n此操作不可恢复。`
+  if (!confirm(confirmMsg)) return
   try {
-    if (t.type === 'online_form') {
+    if (t.type === 'email') {
+      const { emailsApi } = await import('../api')
+      await emailsApi.deleteTracker(t.source_id)
+    } else if (t.type === 'online_form') {
       await onlineFormsApi.delete(t.source_id)
     } else {
-      // 文件收集类暂用 cancel（标记取消）
       const { formsApi } = await import('../api')
       await formsApi.cancel(t.tracker_id)
     }

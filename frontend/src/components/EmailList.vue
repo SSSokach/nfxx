@@ -101,6 +101,9 @@
       <div class="context-menu-item" @click="handleAddTodo">
         <span class="menu-icon">📋</span><span>加入待办</span>
       </div>
+      <div class="context-menu-item" v-if="activeFolder === 'sent'" @click="setAsTracking">
+        <span class="menu-icon">📊</span><span>设为事项跟踪项</span>
+      </div>
     </div>
 
     <!-- Toast -->
@@ -114,7 +117,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { usersApi, emailsApi } from '../api'
 
-const emit = defineEmits(['user-change', 'email-select', 'compose-trigger', 'ai-chat', 'todo-created', 'view-change', 'jump-completed'])
+const emit = defineEmits(['user-change', 'email-select', 'compose-trigger', 'ai-chat', 'todo-created', 'view-change', 'jump-completed', 'refresh-trackers'])
 
 const props = defineProps({
   currentUserId: { type: Number, default: 1 },
@@ -303,6 +306,19 @@ const handleAddTodo = async () => {
   } catch (e) {
     showToast('加入待办失败')
   }
+}
+
+const setAsTracking = async () => {
+  const email = contextMenu.value.email
+  if (!email) return
+  try {
+    const res = await emailsApi.trackSent(currentUserId.value, email.id)
+    showToast(res.data.message || '已设为事项跟踪项')
+    emit('refresh-trackers')
+  } catch (e) {
+    showToast('设置失败: ' + (e.response?.data?.detail || e.message))
+  }
+  closeContextMenu()
 }
 
 onMounted(() => {

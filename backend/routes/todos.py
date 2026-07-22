@@ -423,8 +423,11 @@ def convert_summary_to_todo(todo_id: int, db: Session = Depends(get_db)):
 # ------------------------------------------------------------------ #
 
 @router.post("/scan-candidates/{user_id}")
-def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
-    """AI 扫描最近消息，自动检测候选待办（需用户确认）。
+def scan_candidate_todos(user_id: int, email_only: bool = False, db: Session = Depends(get_db)):
+    """AI 扫描最近消息和邮件，自动检测候选待办（需用户确认）。
+
+    参数：
+    - email_only: 若为 True，只扫描邮件，跳过消息扫描。
 
     去重逻辑：
     - 已有候选待办记录（pending/confirmed/dismissed）的消息不会重复扫描
@@ -469,140 +472,145 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
     processed_ids = scanned_msg_ids | candidate_msg_ids | todo_msg_ids
 
     # === 查询未处理的消息 ===
-    # 优化策略：
-    # - 群聊：只取 @所有人 或 @当前用户 的消息（群聊噪声大，@才有相关性）
-    # - 私聊：全量取（私聊消息量少，都需要看）
-    # - 时间范围：今日消息 与 最近100条 取较大者（保证至少能扫到今天全部 + 历史最近100条）
-    from datetime import date as date_cls
-
-    today_start = datetime.combine(date_cls.today(), datetime.min.time())
-
-    # 区分群聊和私聊的 contact_id
-    group_contact_ids = [c.id for c in all_contacts if c.is_group]
-    private_contact_ids = [c.id for c in all_contacts if not c.is_group]
-
-    # --- 群聊消息：只取 @所有人 或 @当前用户名 的 ---
-    group_msgs_today = []
-    group_msgs_recent = []
-    if group_contact_ids:
-        group_today_q = db.query(Message).filter(
-            Message.contact_id.in_(group_contact_ids),
-            Message.sender_id != user_id,
-            Message.created_at >= today_start,
-            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
-            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
-        ).all()
-        group_msgs_today = group_today_q
-
-        group_recent_q = db.query(Message).filter(
-            Message.contact_id.in_(group_contact_ids),
-            Message.sender_id != user_id,
-            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
-            Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
-        ).order_by(Message.created_at.desc()).limit(100).all()
-        group_msgs_recent = group_recent_q
-
-    # --- 私聊消息：全量取 ---
-    private_msgs_today = []
-    private_msgs_recent = []
-    if private_contact_ids:
-        private_msgs_today = db.query(Message).filter(
-            Message.contact_id.in_(private_contact_ids),
-            Message.sender_id != user_id,
-            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
-            Message.created_at >= today_start,
-        ).all()
-
-        private_msgs_recent = db.query(Message).filter(
-            Message.contact_id.in_(private_contact_ids),
-            Message.sender_id != user_id,
-            Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
-        ).order_by(Message.created_at.desc()).limit(100).all()
-
-    # 合并：今日消息 与 最近100条 取并集（去重），实现"较大者"
-    # 用 dict 按 message.id 去重，保留 Message 对象
-    merged_by_id = {}
-    for m in group_msgs_today + group_msgs_recent + private_msgs_today + private_msgs_recent:
-        merged_by_id[m.id] = m
-    recent_msgs = list(merged_by_id.values())
-
-    unprocessed = [m for m in recent_msgs if m.id not in processed_ids]
-    # 注意：此处不再 early-return，即使没有新消息也要继续扫描邮件
-
-    # 构建批量消息（按时间正序）
-    unprocessed.sort(key=lambda m: m.created_at)
+    # email_only 模式下跳过消息扫描，直接进入邮件扫描
+    recent_msgs = []
+    unprocessed = []
     messages_batch = []
-    for m in unprocessed:
-        contact = next((c for c in all_contacts if c.id == m.contact_id), None)
-        source_name = contact.name if contact else ""
-        source_type = "group" if (contact and contact.is_group) else "private"
-        messages_batch.append({
-            "id": m.id,
-            "sender": m.sender.name if m.sender else "",
-            "source": source_name,
-            "content": m.content,
-            "contact_id": m.contact_id,
-            "source_type": source_type,
-        })
+    msg_new_count = 0
+    msg_scanned_total = 0
+    errors = None
+    errors_email = None
 
-    # 调用 AI / 规则检测候选待办（消息为空时跳过 AI 调用）
-    if messages_batch:
-        try:
-            candidates = glm_ai.detect_candidate_todos(messages_batch, user_name)
-        except Exception as e:
-            candidates = []
-            errors = f"消息候选检测失败: {e}"
-    else:
+    if not email_only:
+        # 优化策略：
+        # - 群聊：只取 @所有人 或 @当前用户 的消息（群聊噪声大，@才有相关性）
+        # - 私聊：全量取（私聊消息量少，都需要看）
+        # - 时间范围：今日消息 与 最近100条 取较大者（保证至少能扫到今天全部 + 历史最近100条）
+        from datetime import date as date_cls
+
+        today_start = datetime.combine(date_cls.today(), datetime.min.time())
+
+        # 区分群聊和私聊的 contact_id
+        group_contact_ids = [c.id for c in all_contacts if c.is_group]
+        private_contact_ids = [c.id for c in all_contacts if not c.is_group]
+
+        # --- 群聊消息：只取 @所有人 或 @当前用户名 的 ---
+        group_msgs_today = []
+        group_msgs_recent = []
+        if group_contact_ids:
+            group_today_q = db.query(Message).filter(
+                Message.contact_id.in_(group_contact_ids),
+                Message.sender_id != user_id,
+                Message.created_at >= today_start,
+                Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
+                Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+            ).all()
+            group_msgs_today = group_today_q
+
+            group_recent_q = db.query(Message).filter(
+                Message.contact_id.in_(group_contact_ids),
+                Message.sender_id != user_id,
+                Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
+                Message.content.like(f"%@所有人%") | Message.content.like(f"%@{user_name}%"),
+            ).order_by(Message.created_at.desc()).limit(100).all()
+            group_msgs_recent = group_recent_q
+
+        # --- 私聊消息：全量取 ---
+        private_msgs_today = []
+        private_msgs_recent = []
+        if private_contact_ids:
+            private_msgs_today = db.query(Message).filter(
+                Message.contact_id.in_(private_contact_ids),
+                Message.sender_id != user_id,
+                Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
+                Message.created_at >= today_start,
+            ).all()
+
+            private_msgs_recent = db.query(Message).filter(
+                Message.contact_id.in_(private_contact_ids),
+                Message.sender_id != user_id,
+                Message.message_type != "online_form",  # 在线表格消息已自动生成待办，跳过避免重复
+            ).order_by(Message.created_at.desc()).limit(100).all()
+
+        # 合并：今日消息 与 最近100条 取并集（去重），实现"较大者"
+        # 用 dict 按 message.id 去重，保留 Message 对象
+        merged_by_id = {}
+        for m in group_msgs_today + group_msgs_recent + private_msgs_today + private_msgs_recent:
+            merged_by_id[m.id] = m
+        recent_msgs = list(merged_by_id.values())
+
+        unprocessed = [m for m in recent_msgs if m.id not in processed_ids]
+
+        # 构建批量消息（按时间正序）
+        unprocessed.sort(key=lambda m: m.created_at)
+        for m in unprocessed:
+            contact = next((c for c in all_contacts if c.id == m.contact_id), None)
+            source_name = contact.name if contact else ""
+            source_type = "group" if (contact and contact.is_group) else "private"
+            messages_batch.append({
+                "id": m.id,
+                "sender": m.sender.name if m.sender else "",
+                "source": source_name,
+                "content": m.content,
+                "contact_id": m.contact_id,
+                "source_type": source_type,
+            })
+
+        # 调用 AI / 规则检测候选待办（消息为空时跳过 AI 调用）
         candidates = []
+        if messages_batch:
+            try:
+                candidates = glm_ai.detect_candidate_todos(messages_batch, user_name)
+            except Exception as e:
+                candidates = []
+                errors = f"消息候选检测失败: {e}"
 
-    # === 保存候选待办（二次去重，防止并发问题）===
-    new_count = 0
-    for c in candidates:
-        msg_id = c.get("message_id")
-        if not msg_id:
-            continue
-        # 二次检查：确保该消息没有已有的候选待办
-        existing = db.query(CandidateTodo).filter(
-            CandidateTodo.user_id == user_id,
-            CandidateTodo.source_message_id == msg_id,
-        ).first()
-        if existing:
-            continue
+        # === 保存候选待办（二次去重，防止并发问题）===
+        for c in candidates:
+            msg_id = c.get("message_id")
+            if not msg_id:
+                continue
+            # 二次检查：确保该消息没有已有的候选待办
+            existing = db.query(CandidateTodo).filter(
+                CandidateTodo.user_id == user_id,
+                CandidateTodo.source_message_id == msg_id,
+            ).first()
+            if existing:
+                continue
 
-        msg_data = next((m for m in messages_batch if m["id"] == msg_id), None)
-        if not msg_data:
-            continue
+            msg_data = next((m for m in messages_batch if m["id"] == msg_id), None)
+            if not msg_data:
+                continue
 
-        candidate = CandidateTodo(
-            user_id=user_id,
-            source_message_id=msg_id,
-            source_type=msg_data["source_type"],
-            source_name=msg_data["source"],
-            content=c.get("content", ""),
-            deadline=_parse_deadline(c.get("deadline")),
-            status="pending",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(candidate)
-        new_count += 1
-
-    # === 将本次扫描的所有消息标记为已扫描（无论是否检测到候选）===
-    for m in messages_batch:
-        # 避免重复插入
-        already = db.query(ScannedMessage).filter(
-            ScannedMessage.user_id == user_id,
-            ScannedMessage.message_id == m["id"],
-        ).first()
-        if not already:
-            db.add(ScannedMessage(
+            candidate = CandidateTodo(
                 user_id=user_id,
-                message_id=m["id"],
-                scanned_at=datetime.utcnow(),
-            ))
+                source_message_id=msg_id,
+                source_type=msg_data["source_type"],
+                source_name=msg_data["source"],
+                content=c.get("content", ""),
+                deadline=_parse_deadline(c.get("deadline")),
+                status="pending",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(candidate)
+            msg_new_count += 1
 
-    msg_new_count = new_count
-    msg_scanned_total = len(unprocessed) if 'unprocessed' in locals() else 0
+        # === 将本次扫描的所有消息标记为已扫描（无论是否检测到候选）===
+        for m in messages_batch:
+            # 避免重复插入
+            already = db.query(ScannedMessage).filter(
+                ScannedMessage.user_id == user_id,
+                ScannedMessage.message_id == m["id"],
+            ).first()
+            if not already:
+                db.add(ScannedMessage(
+                    user_id=user_id,
+                    message_id=m["id"],
+                    scanned_at=datetime.utcnow(),
+                ))
+
+        msg_scanned_total = len(unprocessed)
 
     # === 扫描邮件 → 候选待办 ===
     # 已扫描过的邮件集合
@@ -629,10 +637,11 @@ def scan_candidate_todos(user_id: int, db: Session = Depends(get_db)):
     }
     processed_email_ids = scanned_email_ids | candidate_email_ids | todo_email_ids
 
-    # 只扫描收件箱里的原始邮件（非回复）
+    # 只扫描收件箱里的原始邮件（非回复，且只扫收件箱，不扫已发送）
     all_emails = db.query(Email).filter(
         Email.user_id == user_id,
         Email.is_reply == False,
+        Email.folder == "inbox",
     ).order_by(Email.sent_at.desc()).limit(50).all()
 
     unprocessed_emails = [e for e in all_emails if e.id not in processed_email_ids]
@@ -839,8 +848,9 @@ def dismiss_candidate(candidate_id: int, db: Session = Depends(get_db)):
 def rescan_emails(user_id: int, db: Session = Depends(get_db)):
     """重置邮件扫描记录，使所有邮件可以在下次扫描时重新被检测。
 
-    删除该用户的 ScannedEmail 记录，以及 pending/dismissed 状态的邮件候选待办。
-    已确认（confirmed）的候选和正式邮件待办不受影响，但其关联的邮件仍会重新扫描。
+    删除该用户的 ScannedEmail 记录、pending/dismissed 状态的邮件候选待办，
+    以及 no_action 状态的邮件待办（这些是旧 API 标记为"无需处理"的记录，会阻止重新扫描）。
+    已确认（confirmed）的候选和正式邮件待办（pending/completed）不受影响。
     """
     # 删除已扫描邮件记录
     db.query(ScannedEmail).filter(ScannedEmail.user_id == user_id).delete()
@@ -849,6 +859,11 @@ def rescan_emails(user_id: int, db: Session = Depends(get_db)):
         CandidateTodo.user_id == user_id,
         CandidateTodo.source_email_id.isnot(None),
         CandidateTodo.status.in_(["pending", "dismissed"]),
+    ).delete()
+    # 删除 no_action 状态的邮件待办（旧 API 标记的"无需处理"，会阻止重新扫描）
+    db.query(EmailTodoItem).filter(
+        EmailTodoItem.user_id == user_id,
+        EmailTodoItem.status == "no_action",
     ).delete()
     db.commit()
 

@@ -1085,6 +1085,41 @@ def list_trackers(user_id: int, db: Session = Depends(get_db)):
             },
         })
 
+    # ============ 邮件追踪 ============
+    from models import EmailTracker
+    from routes.emails import _check_single_tracker
+    email_trackers = db.query(EmailTracker).filter(
+        EmailTracker.user_id == user_id
+    ).all()
+    for t in email_trackers:
+        # 每次加载时自动检查最新回复状态
+        _check_single_tracker(t, db)
+        db.refresh(t)
+        replied = [d.strip() for d in (t.replied_depts or "").split("|") if d.strip()]
+        unreplied = [d.strip() for d in (t.unreplied_depts or "").split("|") if d.strip()]
+        all_members = replied + unreplied
+        result.append({
+            "tracker_id": t.id,
+            "type": "email",
+            "source_id": t.id,
+            "title": t.subject,
+            "form_url": None,
+            "contact_id": None,
+            "required_members": all_members,
+            "filled_members": replied,
+            "unfilled_members": unreplied,
+            "deadline": None,
+            "status": t.status,
+            "last_checked": t.last_checked_at.isoformat() if t.last_checked_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "progress": {
+                "total": len(all_members),
+                "filled": len(replied),
+                "percent": round(len(replied) / len(all_members) * 100, 1) if all_members else 0,
+            },
+            "email_id": t.email_id,
+        })
+
     # 按创建时间倒序
     result.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return result

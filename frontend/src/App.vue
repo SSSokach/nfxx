@@ -41,6 +41,7 @@
             @todo-created="handleTodoCreated"
             @view-change="handleViewChange"
             @jump-completed="handleJumpCompleted"
+            @refresh-trackers="handleRefreshTrackers"
           />
           <div ref="emailDetailWrapRef" class="chat-area-wrap">
             <EmailDetail
@@ -64,7 +65,7 @@
             :open-key="aiPanelOpenKey"
             @resize="handleAiPanelResize"
             @jump-to-message="handleJumpToMessage"
-            @jump-to-email="handleJumpToEmail"
+            @jump-to-email="handleJumpToEmailFromTracker"
             @message-sent="handleAiMessageSent"
             @close="aiPanelVisible = false"
           />
@@ -437,6 +438,25 @@ const handleJumpToEmail = async ({ email_id }) => {
 
 const handleJumpCompleted = () => {
   jumpToEmailId.value = null
+}
+
+// ===== 从事项跟踪项跳转到对应邮件 =====
+const handleJumpToEmailFromTracker = async ({ email_id }) => {
+  if (!email_id) return
+  // 切换到邮箱视图
+  viewMode.value = 'emails'
+  selectedContact.value = null
+  selectedEmail.value = null
+  selectedEmailDetail.value = null
+  composeMode.value = false
+  // 等待 EmailList 挂载后再设置目标 id，触发邮件详情显示
+  await nextTick()
+  jumpToEmailId.value = email_id
+}
+
+// ===== 邮件设为事项跟踪项后刷新追踪列表 =====
+const handleRefreshTrackers = () => {
+  todoRefreshKey.value++
 }
 
 const handleScrollToMessage = (msgId) => {
