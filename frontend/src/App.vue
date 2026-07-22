@@ -60,6 +60,7 @@
             :context-message="aiContextMessage"
             :todo-refresh-key="todoRefreshKey"
             :width="aiPanelWidth"
+            :open-key="aiPanelOpenKey"
             @resize="handleAiPanelResize"
             @jump-to-message="handleJumpToMessage"
             @jump-to-email="handleJumpToEmail"
@@ -78,7 +79,7 @@
           @mousedown="onFabMouseDown"
         >
           <div class="ai-fab-pulse" v-if="!isDragging && !isEdgeHidden"></div>
-          <svg class="ai-fab-svg" v-if="!isEdgeHidden" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg class="ai-fab-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="currentColor"/>
             <circle cx="19" cy="5" r="1.5" fill="currentColor" opacity="0.6"/>
             <circle cx="5" cy="19" r="1" fill="currentColor" opacity="0.4"/>
@@ -108,6 +109,7 @@ const emailRefreshKey = ref(0)
 const aiContextMessage = ref(null)
 const todoRefreshKey = ref(0)
 const aiPanelVisible = ref(false)
+const aiPanelOpenKey = ref(0)
 const highlightMessageId = ref(null)
 const jumpToEmailId = ref(null)
 
@@ -122,10 +124,13 @@ const dragState = ref({ startX: 0, startY: 0, originX: 0, originY: 0, moved: fal
 
 const FAB_SIZE = 64
 const EDGE_THRESHOLD = 50      // 距离边框小于此值视为贴边
-const EDGE_HIDE_OFFSET = 36     // 贴边隐藏时露出的宽度
+const EDGE_BAR_W = 14          // 贴边收缩后的竖条宽度
 
-// 获取聊天框边界（浮动球只在聊天框范围内活动和贴边）
+// 获取消息记录区域边界（贴 messages-container 的视觉边缘线）
 const getChatBounds = () => {
+  if (chatAreaRef.value && chatAreaRef.value.messagesContainer) {
+    return chatAreaRef.value.messagesContainer.getBoundingClientRect()
+  }
   if (chatAreaWrapRef.value) {
     return chatAreaWrapRef.value.getBoundingClientRect()
   }
@@ -139,8 +144,8 @@ const getChatBounds = () => {
 const initFabPos = () => {
   const b = getChatBounds()
   fabPos.value = {
-    x: b.right - FAB_SIZE - 32,
-    y: b.bottom - FAB_SIZE - 32
+    x: b.right - 16 - FAB_SIZE - 12,
+    y: b.bottom - FAB_SIZE - 12
   }
 }
 
@@ -167,8 +172,8 @@ const onFabMouseMove = (e) => {
   const b = getChatBounds()
   let nx = dragState.value.originX + dx
   let ny = dragState.value.originY + dy
-  // 约束在聊天框范围内
-  nx = Math.max(b.left, Math.min(b.right - FAB_SIZE, nx))
+  // 约束在消息区域内（右侧避开滚动条）
+  nx = Math.max(b.left, Math.min(b.right - 16 - FAB_SIZE, nx))
   ny = Math.max(b.top, Math.min(b.bottom - FAB_SIZE, ny))
   fabPos.value = { x: nx, y: ny }
 }
@@ -186,7 +191,7 @@ const onFabMouseUp = () => {
     if (isEdgeHidden.value) {
       isEdgeHidden.value = false
       const b = getChatBounds()
-      fabPos.value = { x: b.right - FAB_SIZE - 32, y: b.bottom - FAB_SIZE - 32 }
+      fabPos.value = { x: b.right - FAB_SIZE - 12, y: b.bottom - FAB_SIZE - 12 }
     } else {
       openAIPanel()
     }
@@ -196,15 +201,16 @@ const onFabMouseUp = () => {
 const checkEdgeHide = () => {
   const b = getChatBounds()
   const { x, y } = fabPos.value
-  // 只检查左右边，不贴上下边
+  const SCROLLBAR_W = 16  // 滚动条宽度+偏移，贴右边时避开滚动条
+  // 检查左右边（贴在 messages-container 内容视觉边缘线上）
   const distLeft = x - b.left
-  const distRight = b.right - FAB_SIZE - x
+  const distRight = b.right - SCROLLBAR_W - FAB_SIZE - x
   const minDist = Math.min(distLeft, distRight)
   if (minDist < EDGE_THRESHOLD) {
     isEdgeHidden.value = true
-    // 贴到聊天框左/右内侧边缘
+    // 收缩后宽度变为 EDGE_BAR_W，位置需调整使球边缘紧贴容器内容区边缘
     if (distLeft === minDist) fabPos.value.x = b.left
-    else fabPos.value.x = b.right - FAB_SIZE
+    else fabPos.value.x = b.right - SCROLLBAR_W - EDGE_BAR_W
   } else {
     isEdgeHidden.value = false
   }
@@ -216,7 +222,7 @@ const onFabClick = () => {
   if (isEdgeHidden.value) {
     isEdgeHidden.value = false
     const b = getChatBounds()
-    fabPos.value = { x: b.right - FAB_SIZE - 32, y: b.bottom - FAB_SIZE - 32 }
+    fabPos.value = { x: b.right - FAB_SIZE - 12, y: b.bottom - FAB_SIZE - 12 }
     return
   }
   openAIPanel()
@@ -226,7 +232,7 @@ const onResize = () => {
   const b = getChatBounds()
   const { x, y } = fabPos.value
   fabPos.value = {
-    x: Math.max(b.left, Math.min(b.right - FAB_SIZE, x)),
+    x: Math.max(b.left, Math.min(b.right - 16 - FAB_SIZE, x)),
     y: Math.max(b.top, Math.min(b.bottom - FAB_SIZE, y))
   }
   if (!isEdgeHidden.value) checkEdgeHide()
@@ -234,11 +240,14 @@ const onResize = () => {
 
 // 根据贴边状态决定尺寸/位置样式
 const fabStyle = computed(() => {
-  const b = getChatBounds()
   let w = FAB_SIZE, h = FAB_SIZE, r = '50%'
   if (isEdgeHidden.value) {
-    // 贴左右边后收缩为竖条
-    w = 14; h = 56; r = '8px'
+    const b = getChatBounds()
+    const { x } = fabPos.value
+    const onLeft = Math.abs(x - b.left) < 2
+    // 贴左边：右侧圆角左侧平；贴右边：左侧圆角右侧平
+    w = EDGE_BAR_W; h = 56
+    r = onLeft ? '0 8px 8px 0' : '8px 0 0 8px'
   }
   return {
     left: fabPos.value.x + 'px',
@@ -375,6 +384,7 @@ const handleEmailSent = () => {
 
 const openAIPanel = () => {
   aiPanelVisible.value = true
+  aiPanelOpenKey.value++
 }
 
 // ===== Jump to message from todo =====
@@ -511,54 +521,66 @@ body { font-family: -apple-system, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft Ya
 /* ===== 浮动 AI 按钮（可拖拽 + 贴边隐藏） ===== */
 .ai-fab {
   position: fixed;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: none;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.06);
   cursor: grab;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: #fff;
-  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.45), 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 999;
+  z-index: 1000;
   user-select: none;
   -webkit-user-select: none;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
   touch-action: none;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s ease,
+              opacity 0.3s ease;
+}
+.ai-fab.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  opacity: 0.92;
 }
 .ai-fab:hover {
-  transform: scale(1.08);
-  box-shadow: 0 6px 28px rgba(102, 126, 234, 0.6), 0 2px 10px rgba(0, 0, 0, 0.2);
-}
-.ai-fab:active {
-  transform: scale(0.95);
+  box-shadow: 0 8px 28px rgba(59, 130, 246, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 .ai-fab-svg {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+  color: #3b82f6;
+  transition: transform 0.3s ease, color 0.3s ease;
+}
+.ai-fab:hover .ai-fab-svg {
+  color: #2563eb;
+  transform: scale(1.08);
 }
 .ai-fab-label {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 2px;
+  font-weight: 600;
   letter-spacing: 0.5px;
+  transition: opacity 0.3s ease;
 }
 .ai-fab-pulse {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px solid rgba(102, 126, 234, 0.4);
-  animation: aiFabPulse 2s ease-out infinite;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  animation: aiFabPulse 2.4s ease-out infinite;
   pointer-events: none;
 }
 @keyframes aiFabPulse {
-  0% { transform: scale(1); opacity: 0.6; }
+  0% { transform: scale(1); opacity: 0.8; }
   100% { transform: scale(1.5); opacity: 0; }
 }
 .ai-fab-edge-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
   letter-spacing: 1px;
   writing-mode: vertical-rl;
@@ -566,15 +588,18 @@ body { font-family: -apple-system, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft Ya
   line-height: 1;
 }
 .ai-fab.edge-hidden {
-  background: #3b82f6 !important;
-  border: none !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.4);
+  background: #3b82f6;
+  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.35);
+  opacity: 0.7;
+  border: 1px solid rgba(59, 130, 246, 0.5);
 }
 .ai-fab.edge-hidden:hover {
-  opacity: 0.85;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.6);
+  opacity: 1;
+  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.5);
+}
+.ai-fab.edge-hidden .ai-fab-svg {
+  width: 12px;
+  height: 12px;
+  color: #ffffff;
 }
 </style>

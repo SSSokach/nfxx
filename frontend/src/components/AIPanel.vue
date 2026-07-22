@@ -354,7 +354,8 @@ const props = defineProps({
   currentUserId: Number,
   contextMessage: { type: Object, default: null },
   todoRefreshKey: { type: Number, default: 0 },
-  width: { type: Number, default: 360 }
+  width: { type: Number, default: 360 },
+  openKey: { type: Number, default: 0 }
 })
 
 const emit = defineEmits(['jump-to-message', 'jump-to-email', 'close', 'resize', 'message-sent'])
@@ -473,8 +474,8 @@ const showQuickBubbles = computed(() => !hasUserSentMessage.value)
 const quickBubbles = [
   { label: '📄 总结文件内容', prompt: '帮我总结文件内容' },
   { label: '📊 生成工作报告', prompt: '帮我生成今日日报' },
-  { label: '✨ 文本润色', prompt: '帮我润色一段文字' },
-  { label: '✉️ 撰写邮件', prompt: '帮我写一封邮件' },
+  { label: '✨ 文本润色', prompt: '帮我润色一段文字：""' },
+  { label: '✉️ 撰写邮件', prompt: '帮我写一封邮件：""' },
   { label: '🔍 提取信息', prompt: '帮我从文本中提取关键信息' }
 ]
 
@@ -501,6 +502,11 @@ watch(() => props.todoRefreshKey, () => {
   loadAllTodos()
 })
 
+// 每次面板打开时重置气泡显示状态（让快捷气泡每次打开都弹出）
+watch(() => props.openKey, () => {
+  hasUserSentMessage.value = false
+})
+
 watch(() => props.currentUserId, () => {
   chatTodos.value = []
   emailTodos.value = []
@@ -516,9 +522,19 @@ const clearContext = () => {
 
 const fillPrompt = (prompt) => {
   aiInput.value = prompt
+  const quoteIdx = prompt.indexOf('""')
   nextTick(() => {
     const input = document.querySelector('.ai-input')
-    if (input) input.focus()
+    if (input) {
+      input.focus()
+      // 如果 prompt 中有 ""，把光标移到引号中间
+      if (quoteIdx !== -1) {
+        // 延迟一帧确保 v-model 已同步到 DOM
+        requestAnimationFrame(() => {
+          input.setSelectionRange(quoteIdx + 1, quoteIdx + 1)
+        })
+      }
+    }
   })
 }
 
