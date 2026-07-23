@@ -718,6 +718,63 @@ def build_registry(user_id, user_name):
         handler=extract_information_tool,
     )
 
+    # ===== 工作报告生成工具（获取所有时间段已完成+未完成待办） =====
+    def generate_work_report_tool(args):
+        """工作报告工具：查询所有已完成和未完成待办，生成 Markdown 报告。"""
+        db = SessionLocal()
+        try:
+            # 所有未完成待办
+            pending_chat = db.query(ChatTodoItem).filter(
+                ChatTodoItem.user_id == user_id,
+                ChatTodoItem.status == "pending",
+            ).order_by(ChatTodoItem.created_at.desc()).all()
+            pending_email = db.query(EmailTodoItem).filter(
+                EmailTodoItem.user_id == user_id,
+                EmailTodoItem.status == "pending",
+            ).order_by(EmailTodoItem.created_at.desc()).all()
+
+            # 所有已完成待办（不限时间）
+            completed_chat = db.query(ChatTodoItem).filter(
+                ChatTodoItem.user_id == user_id,
+                ChatTodoItem.status == "completed",
+            ).order_by(ChatTodoItem.completed_at.desc().nullslast()).all()
+            completed_email = db.query(EmailTodoItem).filter(
+                EmailTodoItem.user_id == user_id,
+                EmailTodoItem.status == "completed",
+            ).order_by(EmailTodoItem.completed_at.desc().nullslast()).all()
+        finally:
+            db.close()
+
+        # 格式化未完成
+        pending_tasks = []
+        for t in pending_chat:
+            dl = f" (截止:{t.deadline.isoformat()})" if t.deadline else ""
+            src = f"[{t.group_name}]" if t.group_name else (f"[{t.peer_name}]" if t.peer_name else "")
+            pending_tasks.append(f"{src} {t.content}{dl}")
+        for t in pending_email:
+            dl = f" (截止:{t.deadline.isoformat()})" if t.deadline else ""
+            pending_tasks.append(f"[邮件:{t.subject}] {t.content}{dl}")
+
+        # 格式化已完成
+        completed_tasks = []
+        for t in completed_chat:
+            ts = t.completed_at.strftime("%Y-%m-%d %H:%M") if t.completed_at else "未知时间"
+            src = f"[{t.group_name}]" if t.group_name else (f"[{t.peer_name}]" if t.peer_name else "")
+            completed_tasks.append(f"{src} {t.content} (完成于:{ts})")
+        for t in completed_email:
+            ts = t.completed_at.strftime("%Y-%m-%d %H:%M") if t.completed_at else "未知时间"
+            completed_tasks.append(f"[邮件:{t.subject}] {t.content} (完成于:{ts})")
+
+        report = generate_work_report(completed_tasks, pending_tasks)
+        return report
+
+    registry.register(
+        name="generate_work_report",
+        description="生成工作报告（周报/月报/工作总结）。查询所有时间段内已完成和未完成的待办事项，生成 Markdown 格式的工作报告。当用户要求生成周报、月报、工作报告、工作总结时使用。",
+        parameters={"type": "object", "properties": {}},
+        handler=generate_work_report_tool,
+    )
+
     return registry
 
 

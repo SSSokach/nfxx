@@ -70,7 +70,11 @@
         </div>
 
         <!-- Quick prompt bubbles (above input, vertical, only before first message) -->
-        <div class="ai-quick-bubbles-vertical" v-if="showQuickBubbles">
+        <div class="ai-quick-bubbles-vertical" v-if="showQuickBubbles && !bubblesDismissed">
+          <div class="ai-quick-bubbles-header">
+            <span class="ai-quick-bubbles-title">快捷指令</span>
+            <button class="ai-quick-bubbles-close" @click="bubblesDismissed = true" title="收起">✕</button>
+          </div>
           <button
             v-for="btn in quickBubbles"
             :key="btn.label"
@@ -527,6 +531,7 @@ const aiLoading = ref(false)
 const localContext = ref(null)
 const aiMessagesContainer = ref(null)
 const hasUserSentMessage = ref(false)
+const bubblesDismissed = ref(false)
 
 const renderMarkdown = (text) => {
   if (!text) return ''
@@ -571,6 +576,7 @@ watch(() => props.todoRefreshKey, () => {
 // 每次面板打开时重置气泡显示状态（让快捷气泡每次打开都弹出）
 watch(() => props.openKey, () => {
   hasUserSentMessage.value = false
+  bubblesDismissed.value = false
 })
 
 watch(() => props.currentUserId, () => {
@@ -1426,6 +1432,32 @@ const checkAllTrackers = async () => {
   background-color: #faf9ff;
   border-top: 1px solid #e8eaf0;
   flex-shrink: 0;
+}
+.ai-quick-bubbles-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.ai-quick-bubbles-title {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+}
+.ai-quick-bubbles-close {
+  border: none;
+  background: none;
+  color: #c0c0c0;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+.ai-quick-bubbles-close:hover {
+  color: #6b7280;
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .ai-quick-bubble-v {
