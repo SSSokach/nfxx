@@ -127,17 +127,12 @@
             <div class="todo-scan-group">
               <button
                 class="todo-scan-btn"
-                :disabled="candidateScanning || emailScanning"
-                @click="scanCandidates"
-              >{{ candidateScanning ? '扫描中...' : 'AI扫描消息' }}</button>
-              <button
-                class="todo-scan-btn email"
-                :disabled="candidateScanning || emailScanning"
-                @click="scanEmails"
-              >{{ emailScanning ? '扫描中...' : '扫描邮件' }}</button>
+                :disabled="candidateScanning"
+                @click="scanAll"
+              >{{ candidateScanning ? '扫描中...' : 'AI扫描' }}</button>
             </div>
           </div>
-          <div v-if="(candidateScanning || emailScanning) && candidateTodos.length === 0" class="pane-loading">AI 正在扫描...</div>
+          <div v-if="candidateScanning && candidateTodos.length === 0" class="pane-loading">AI 正在扫描...</div>
           <div class="todo-scroll">
             <div v-if="candidateTodos.length === 0 && !candidateScanning" class="pane-empty">暂无候选待办</div>
             <div
@@ -815,7 +810,8 @@ const loadCandidates = async () => {
   }
 }
 
-const scanCandidates = async () => {
+// AI扫描：一次性扫描消息+邮件，生成候选待办
+const scanAll = async () => {
   if (!props.currentUserId || candidateScanning.value) return
   candidateScanning.value = true
   todoError.value = ''
@@ -826,22 +822,6 @@ const scanCandidates = async () => {
     todoError.value = 'AI 扫描失败'
   }
   candidateScanning.value = false
-}
-
-// 扫描邮件生成候选待办：先重置扫描记录，再触发扫描
-const emailScanning = ref(false)
-const scanEmails = async () => {
-  if (!props.currentUserId || emailScanning.value) return
-  emailScanning.value = true
-  todoError.value = ''
-  try {
-    await todosApi.rescanEmails(props.currentUserId)
-    await todosApi.scanCandidates(props.currentUserId, true)  // email_only=true，只扫邮件不扫消息
-    await loadCandidates()
-  } catch (e) {
-    todoError.value = '邮件扫描失败'
-  }
-  emailScanning.value = false
 }
 
 const confirmCandidate = async (c) => {
@@ -1797,11 +1777,6 @@ const checkAllTrackers = async () => {
 .todo-scan-group {
   display: flex;
   gap: 6px;
-}
-
-.todo-scan-btn.email {
-  border-color: #3b82f6;
-  background-color: #3b82f6;
 }
 
 .todo-scroll {
