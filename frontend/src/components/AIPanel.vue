@@ -235,17 +235,14 @@
 
           <!-- 统一追踪列表 -->
           <div v-for="t in unifiedTrackers" :key="t.tracker_id"
-               :class="['form-tracker-item', { expanded: expandedTrackerId === t.tracker_id }]">
+               class="form-tracker-item">
             <div class="form-tracker-header"
                  :class="{ clickable: t.type === 'online_form' || t.type === 'email' }"
-                 @click="t.type === 'email' ? jumpToEmailTracker(t) : toggleTrackerExpand(t)">
+                 @click="t.type === 'email' ? jumpToEmailTracker(t) : openFormDetailModal(t)">
               <span class="form-tracker-name">
                 <span class="tracker-type-icon">{{ t.type === 'email' ? '✉️' : '📊' }}</span>
                 <span :class="['type-badge', t.type]">{{ typeLabel(t.type) }}</span>
                 {{ t.title }}
-                <span v-if="t.type === 'online_form'" class="expand-chevron">
-                  {{ expandedTrackerId === t.tracker_id ? '▾' : '▸' }}
-                </span>
               </span>
               <span :class="['form-progress-badge', t.status]">
                 {{ t.progress.filled }}/{{ t.progress.total }}
@@ -274,70 +271,6 @@
                 <span v-if="t.deadline">📅 截止：{{ t.deadline }}</span>
                 <span v-if="t.last_checked"> | 上次检测：{{ t.last_checked }}</span>
               </div>
-            </div>
-
-            <!-- 展开的表格详情 -->
-            <div class="form-tracker-detail" v-if="expandedTrackerId === t.tracker_id && t.type === 'online_form'">
-              <div v-if="expandLoading" class="detail-loading">加载中...</div>
-              <div v-else-if="expandError" class="detail-error">{{ expandError }}</div>
-              <template v-else-if="expandFormData">
-                <div class="detail-scroll">
-                  <table class="detail-table">
-                    <thead>
-                      <tr>
-                        <th v-for="col in expandFormData.columns" :key="col.key">
-                          {{ col.label }}
-                          <span v-if="col.required" class="required-mark">*</span>
-                        </th>
-                        <th>状态</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in expandFormData.rows" :key="row.id">
-                        <td v-for="col in expandFormData.columns" :key="col.key">
-                          <template v-if="col.type === 'name'">
-                            {{ row.data[col.key] || row.member_name }}
-                          </template>
-                          <template v-else-if="editingRowId === row.id">
-                            <input v-if="col.type === 'text'"
-                                   v-model="editData[col.key]" class="cell-input" />
-                            <input v-else-if="col.type === 'number'"
-                                   v-model="editData[col.key]" type="number" class="cell-input" />
-                            <input v-else-if="col.type === 'date'"
-                                   v-model="editData[col.key]" type="date" class="cell-input" />
-                            <select v-else-if="col.type === 'select'"
-                                    v-model="editData[col.key]" class="cell-input">
-                              <option value="">请选择</option>
-                              <option v-for="opt in col.options" :key="opt" :value="opt">{{ opt }}</option>
-                            </select>
-                          </template>
-                          <template v-else>
-                            {{ row.data[col.key] || '-' }}
-                          </template>
-                        </td>
-                        <td>
-                          <span :class="['detail-status', row.filled ? 'done' : 'pending']">
-                            {{ row.filled ? '✓ 已填' : '待填' }}
-                          </span>
-                        </td>
-                        <td>
-                          <button v-if="editingRowId !== row.id" @click="startInlineEdit(row)" class="row-btn">
-                            {{ row.filled ? '修改' : '填写' }}
-                          </button>
-                          <template v-else>
-                            <button @click="saveInlineEdit(row, t)" class="row-btn save">保存</button>
-                            <button @click="cancelInlineEdit" class="row-btn cancel">取消</button>
-                          </template>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div class="detail-footer">
-                  <button @click="refreshInlineForm(t)" class="row-btn">🔄 刷新检测</button>
-                </div>
-              </template>
             </div>
 
             <div class="form-tracker-actions" @click.stop>
@@ -400,6 +333,78 @@
             <!-- AI 总结文本 -->
             <div class="summary-text" v-html="renderMarkdown(aiSummaryData.summary)"></div>
             <!-- 详细明细 -->
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Form Detail Modal -->
+    <div class="form-detail-overlay" v-if="formDetailVisible" @click.self="closeFormDetailModal">
+      <div class="form-detail-modal">
+        <div class="form-detail-header">
+          <h3>📊 {{ formDetailTracker?.title }}</h3>
+          <button class="form-detail-close" @click="closeFormDetailModal">×</button>
+        </div>
+        <div class="form-detail-body">
+          <div v-if="expandLoading" class="detail-loading">加载中...</div>
+          <div v-else-if="expandError" class="detail-error">{{ expandError }}</div>
+          <template v-else-if="expandFormData">
+            <div class="detail-scroll">
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th v-for="col in expandFormData.columns" :key="col.key">
+                      {{ col.label }}
+                      <span v-if="col.required" class="required-mark">*</span>
+                    </th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in expandFormData.rows" :key="row.id">
+                    <td v-for="col in expandFormData.columns" :key="col.key">
+                      <template v-if="col.type === 'name'">
+                        {{ row.data[col.key] || row.member_name }}
+                      </template>
+                      <template v-else-if="editingRowId === row.id">
+                        <input v-if="col.type === 'text'"
+                               v-model="editData[col.key]" class="cell-input" />
+                        <input v-else-if="col.type === 'number'"
+                               v-model="editData[col.key]" type="number" class="cell-input" />
+                        <input v-else-if="col.type === 'date'"
+                               v-model="editData[col.key]" type="date" class="cell-input" />
+                        <select v-else-if="col.type === 'select'"
+                                v-model="editData[col.key]" class="cell-input">
+                          <option value="">请选择</option>
+                          <option v-for="opt in col.options" :key="opt" :value="opt">{{ opt }}</option>
+                        </select>
+                      </template>
+                      <template v-else>
+                        {{ row.data[col.key] || '-' }}
+                      </template>
+                    </td>
+                    <td>
+                      <span :class="['detail-status', row.filled ? 'done' : 'pending']">
+                        {{ row.filled ? '✓ 已填' : '待填' }}
+                      </span>
+                    </td>
+                    <td>
+                      <button v-if="editingRowId !== row.id" @click="startInlineEdit(row)" class="row-btn">
+                        {{ row.filled ? '修改' : '填写' }}
+                      </button>
+                      <template v-else>
+                        <button @click="saveInlineEdit(row, formDetailTracker)" class="row-btn save">保存</button>
+                        <button @click="cancelInlineEdit" class="row-btn cancel">取消</button>
+                      </template>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="detail-footer">
+              <button @click="refreshInlineForm(formDetailTracker)" class="row-btn">🔄 刷新检测</button>
+            </div>
           </template>
         </div>
       </div>
@@ -861,8 +866,9 @@ const trackersChecking = ref(false)
 const showFormCreator = ref(false)
 const formFillerVisible = ref(false)
 const formFillerId = ref(null)
-// ===== Inline expandable form detail =====
-const expandedTrackerId = ref(null)
+// ===== Form detail modal =====
+const formDetailVisible = ref(false)
+const formDetailTracker = ref(null)
 const expandFormData = ref(null)
 const expandLoading = ref(false)
 const expandError = ref('')
@@ -946,19 +952,22 @@ const loadExpandForm = async (t) => {
   expandLoading.value = false
 }
 
-const toggleTrackerExpand = (t) => {
+const openFormDetailModal = (t) => {
   if (t.type !== 'online_form') return
-  if (expandedTrackerId.value === t.tracker_id) {
-    // collapse
-    expandedTrackerId.value = null
-    expandFormData.value = null
-    expandError.value = ''
-    editingRowId.value = null
-    editData.value = {}
-  } else {
-    expandedTrackerId.value = t.tracker_id
-    loadExpandForm(t)
-  }
+  formDetailTracker.value = t
+  formDetailVisible.value = true
+  editingRowId.value = null
+  editData.value = {}
+  loadExpandForm(t)
+}
+
+const closeFormDetailModal = () => {
+  formDetailVisible.value = false
+  formDetailTracker.value = null
+  expandFormData.value = null
+  expandError.value = ''
+  editingRowId.value = null
+  editData.value = {}
 }
 
 const startInlineEdit = (row) => {
@@ -1967,7 +1976,7 @@ const checkAllTrackers = async () => {
 .form-tracker-meta { color: #9ca3af; font-size: 11px; margin-top: 4px; }
 .form-tracker-actions { display: flex; gap: 6px; margin-top: 8px; }
 
-/* ===== Inline expandable form detail ===== */
+/* ===== Form detail modal ===== */
 .form-tracker-header.clickable {
   cursor: pointer;
   user-select: none;
@@ -1975,20 +1984,23 @@ const checkAllTrackers = async () => {
 .form-tracker-header.clickable:hover .form-tracker-name {
   color: #4b8cff;
 }
-.form-tracker-item.expanded {
-  border-color: #4b8cff;
-  background: #f7f9ff;
+.form-detail-overlay {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
 }
-.expand-chevron {
-  font-size: 11px;
-  color: #9ca3af;
-  margin-left: 2px;
+.form-detail-modal {
+  background: #fff; border-radius: 16px; width: 90%; max-width: 720px; max-height: 80vh;
+  display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.25);
 }
-.form-tracker-detail {
-  margin-top: 10px;
-  border-top: 1px dashed #d0dbf0;
-  padding-top: 10px;
+.form-detail-header {
+  padding: 16px 20px; border-bottom: 1px solid #eee;
+  display: flex; justify-content: space-between; align-items: center;
 }
+.form-detail-header h3 { margin: 0; font-size: 16px; }
+.form-detail-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #999; }
+.form-detail-close:hover { color: #333; }
+.form-detail-body { padding: 18px 20px; overflow-y: auto; flex: 1; }
 .detail-loading, .detail-error {
   font-size: 12px;
   color: #6b7280;
@@ -1997,7 +2009,7 @@ const checkAllTrackers = async () => {
 .detail-error { color: #ef4444; }
 .detail-scroll {
   overflow-x: auto;
-  max-height: 280px;
+  max-height: 55vh;
   overflow-y: auto;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
