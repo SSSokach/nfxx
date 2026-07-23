@@ -274,7 +274,6 @@
 
             <div class="form-tracker-actions" @click.stop>
               <button class="form-btn small ai" v-if="t.type === 'online_form' || t.type === 'email'" @click="aiSummaryTracker(t)">🤖 进展汇总</button>
-              <button class="form-btn small info" v-if="t.type === 'email'" @click="jumpToEmailTracker(t)">📧 查看原邮件</button>
               <button class="form-btn small warn" @click="remindTracker(t)" v-if="t.status === 'tracking' && t.unfilled_members.length > 0 && t.type !== 'email'">@催办</button>
               <button class="form-btn small danger" @click="deleteTracker(t)">🗑 删除</button>
             </div>
@@ -871,7 +870,7 @@ const aiSummaryData = ref(null)
 const groupMembersForCreator = ref([])
 
 const typeLabel = (type) => ({
-  online_form: '在线表格',
+  online_form: '表格追踪',
   file_collection: '文件收集',
   tracker_only: '追踪',
   email: '邮件追踪',
@@ -1969,6 +1968,7 @@ const checkAllTrackers = async () => {
   margin-right: 6px;
 }
 .type-badge.online_form { background: #dbeafe; color: #2563eb; }
+.type-badge.email { background: #ede9fe; color: #7c3aed; }
 .type-badge.file_collection { background: #fef3c7; color: #d97706; }
 .type-badge.tracker_only { background: #f3f4f6; color: #6b7280; }
 
