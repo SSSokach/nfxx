@@ -583,8 +583,11 @@ watch(() => props.currentUserId, () => {
   emailTodos.value = []
   candidateTodos.value = []
   todoFilter.value = 'pending'
+  unifiedTrackers.value = []
   loadAllTodos()
   loadCandidates()
+  loadUnifiedTrackers()
+  loadGroupChatsAndMembers()
 })
 
 const clearContext = () => {
