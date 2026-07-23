@@ -94,15 +94,7 @@ msg_at_zhangsan = Message(sender_id=U["李四"], contact_id=gid,
     content="@张三 周五前提交周报到我邮箱",
     created_at=now - timedelta(hours=20))
 msgs.append(msg_at_zhangsan)
-# 催办消息
-msg_remind1 = Message(sender_id=U["张三"], contact_id=gid,
-    content="@赵六 @郑十 请尽快填写表格《7月工作汇报》，截止日期：" + (today + timedelta(days=5)).isoformat(),
-    created_at=now - timedelta(hours=6))
-msgs.append(msg_remind1)
-msg_remind2 = Message(sender_id=U["张三"], contact_id=gid,
-    content="@赵六 @郑十 请尽快填写表格《测试文件260720》，截止日期：" + (today + timedelta(days=10)).isoformat(),
-    created_at=now - timedelta(hours=2))
-msgs.append(msg_remind2)
+# 催办消息（附带在线表格链接，需在表单创建后生成，见下方「在线表单」段落）
 
 # === 项目组 ===
 msgs += [
@@ -397,6 +389,14 @@ db.add(FormTracker(
 ))
 db.commit()
 
+# 催办消息1（附带在线表格链接，前端据此渲染可点击的表格卡片）
+msg_remind1 = Message(sender_id=U["张三"], contact_id=gid,
+    content="@赵六 @郑十 请尽快填写表格《7月工作汇报》，截止日期：" + (today + timedelta(days=5)).isoformat(),
+    message_type="online_form", form_id=form1.id,
+    created_at=now - timedelta(hours=6))
+db.add(msg_remind1); db.commit()
+msgs.append(msg_remind1)
+
 # 为未填写人创建填写待办
 for name in ["赵六", "郑十"]:
     db.add(ChatTodoItem(
@@ -460,6 +460,14 @@ db.add(FormTracker(
     created_at=now - timedelta(hours=48), updated_at=now - timedelta(hours=2),
 ))
 db.commit()
+
+# 催办消息2（附带在线表格链接，前端据此渲染可点击的表格卡片）
+msg_remind2 = Message(sender_id=U["张三"], contact_id=gid,
+    content="@赵六 @郑十 请尽快填写表格《测试文件260720》，截止日期：" + (today + timedelta(days=10)).isoformat(),
+    message_type="online_form", form_id=form2.id,
+    created_at=now - timedelta(hours=2))
+db.add(msg_remind2); db.commit()
+msgs.append(msg_remind2)
 
 # 为未填写人创建填写待办
 for name in ["王五"]:
